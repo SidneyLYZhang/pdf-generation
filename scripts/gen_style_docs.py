@@ -8,7 +8,6 @@ DESC = {
     "page.paper": "纸张：a4 / a5 / 6x9 / letter",
     "page.margin": "四边页边距",
     "page.gutter": "装订线（内侧额外留白）",
-    "page.columns": "分栏数，1 或 2",
     "text.font": "正文字体栈，按顺序取字形",
     "text.heading-font": "标题字体栈",
     "text.size": "正文字号",
@@ -48,22 +47,15 @@ DESC = {
     "toc.title": "目录标题文字",
     "float.figure-caption": "图片题注位置：top / bottom",
     "float.table-caption": "表格题注位置：top / bottom",
-    "float.numbering": "图表编号格式，如 1.1 / none",
+    "float.numbering": "图表编号格式，如 1 / (1) / none",
     "float.figure-width": "图片默认宽度（占正文宽度）",
     "code.theme": "代码高亮：default / none",
     "code.size": "代码字号",
     "code.header": "代码块顶部语言栏",
-    "math.numbering": "公式编号格式，如 1.1 / none",
-    "semantic.numbering": "语义块编号格式；none 表示只显示「定理/例题」标签不编号",
+    "math.numbering": "公式编号格式，如 1 / (1) / none",
+    "semantic.numbering": "语义块编号格式，如 1 / (1)；none 表示只显示标签不编号",
     "novel.dropcap": "章首首字下沉",
     "novel.chapter-prefix": "自动生成「第 N 章」前缀",
-    "letter.sender": "信函发件人（也可写在 frontmatter letter.from）",
-    "letter.recipient": "信函收件人（frontmatter letter.to）",
-    "letter.date": "信函日期（frontmatter letter.date）",
-    "letter.subject": "信函主题（frontmatter letter.subject）",
-    "letter.salutation": "称呼（frontmatter letter.salutation）",
-    "letter.closing": "落款敬语（frontmatter letter.closing）",
-    "letter.signature": "署名（frontmatter letter.signature）",
 }
 
 out = []
@@ -82,7 +74,8 @@ out.append("## 全局默认\n")
 out.append("| 旋钮 | 类型 | 默认值 | 说明 |")
 out.append("|------|------|--------|------|")
 for key, (typ, default) in b.KNOBS.items():
-    out.append(f"| `{key}` | {typ} | `{default}` | {DESC.get(key, '')} |")
+    shown = str(default).lower() if isinstance(default, bool) else default
+    out.append(f"| `{key}` | {typ} | `{shown}` | {DESC.get(key, '')} |")
 
 out.append("\n## 各 Kind 的覆盖\n")
 out.append("只列出与该 Kind 的全局默认不同的项；其余沿用上表。\n")

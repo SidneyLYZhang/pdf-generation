@@ -21,25 +21,24 @@
 | `page.paper` | paper | `a4` | 纸张：a4 / a5 / 6x9 / letter |
 | `page.margin` | length | `2.5cm` | 四边页边距 |
 | `page.gutter` | length | `0cm` | 装订线（内侧额外留白） |
-| `page.columns` | int | `1` | 分栏数，1 或 2 |
 | `text.font` | fontlist | `auto` | 正文字体栈，按顺序取字形 |
 | `text.heading-font` | fontlist | `auto` | 标题字体栈 |
 | `text.size` | length | `11pt` | 正文字号 |
 | `text.leading` | length | `0.65em` | 行距（行与行之间的额外距离） |
 | `text.paragraph-spacing` | length | `1em` | 段间距；小于 4.5pt 会被抬到 4.5pt（Typst 0.15 限制） |
 | `text.first-line-indent` | length | `0em` | 段首缩进，中文书籍习惯 2em |
-| `text.justify` | bool | `True` | 两端对齐 |
-| `text.hyphenate` | bool | `True` | 西文断词 |
+| `text.justify` | bool | `true` | 两端对齐 |
+| `text.hyphenate` | bool | `true` | 西文断词 |
 | `text.lang` | str | `auto` | 语言标签，zh / en / auto |
 | `heading.size-1` | length | `20pt` | 一级标题字号 |
 | `heading.size-2` | length | `14pt` | 二级标题字号 |
 | `heading.size-3` | length | `11.5pt` | 三级标题字号 |
 | `heading.color` | color | `auto` | 标题颜色 |
 | `heading.numbering` | numbering | `1.1` | 标题编号格式：1.1 / 1.a / none |
-| `heading.page-break-before` | bool | `False` | 一级标题是否另起一页 |
+| `heading.page-break-before` | bool | `false` | 一级标题是否另起一页 |
 | `heading.space-before` | length | `1.6em` | 标题上方留白 |
 | `heading.space-after` | length | `0.7em` | 标题下方留白 |
-| `heading.rule` | bool | `False` | 一级标题下是否加细线 |
+| `heading.rule` | bool | `false` | 一级标题下是否加细线 |
 | `color.palette` | palette | `teal` | 配色：teal / indigo / sepia / mono |
 | `color.accent` | color | `auto` | 强调色（色带、语义块边线、链接默认值） |
 | `color.ink` | color | `auto` | 正文颜色 |
@@ -49,7 +48,7 @@
 | `color.code-bg` | color | `auto` | 代码块底色 |
 | `color.tint` | color | `auto` | 语义块与摘要底色 |
 | `furniture.header` | header | `auto` | 页眉：none / title / book（奇偶交替）/ chapter |
-| `furniture.header-rule` | bool | `True` | 页眉下细线 |
+| `furniture.header-rule` | bool | `true` | 页眉下细线 |
 | `furniture.page-number` | pagenumber | `auto` | 页码位置：none / footer-center / footer-right / footer-outside |
 | `furniture.page-number-format` | str | `1` | 页码格式，Typst numbering 写法，如 1 / a / i |
 | `cover.enabled` | bool | `auto` | 是否生成封面 |
@@ -61,22 +60,15 @@
 | `toc.title` | str | `auto` | 目录标题文字 |
 | `float.figure-caption` | captionpos | `bottom` | 图片题注位置：top / bottom |
 | `float.table-caption` | captionpos | `top` | 表格题注位置：top / bottom |
-| `float.numbering` | numbering | `1.1` | 图表编号格式，如 1.1 / none |
+| `float.numbering` | numbering | `1` | 图表编号格式，如 1 / (1) / none |
 | `float.figure-width` | ratio | `82%` | 图片默认宽度（占正文宽度） |
 | `code.theme` | codetheme | `default` | 代码高亮：default / none |
 | `code.size` | length | `9pt` | 代码字号 |
-| `code.header` | bool | `True` | 代码块顶部语言栏 |
-| `math.numbering` | numbering | `none` | 公式编号格式，如 1.1 / none |
-| `semantic.numbering` | numbering | `1.1` | 语义块编号格式；none 表示只显示「定理/例题」标签不编号 |
+| `code.header` | bool | `true` | 代码块顶部语言栏 |
+| `math.numbering` | numbering | `none` | 公式编号格式，如 1 / (1) / none |
+| `semantic.numbering` | numbering | `1` | 语义块编号格式，如 1 / (1)；none 表示只显示标签不编号 |
 | `novel.dropcap` | bool | `auto` | 章首首字下沉 |
 | `novel.chapter-prefix` | bool | `auto` | 自动生成「第 N 章」前缀 |
-| `letter.sender` | str | `` | 信函发件人（也可写在 frontmatter letter.from） |
-| `letter.recipient` | str | `` | 信函收件人（frontmatter letter.to） |
-| `letter.date` | str | `` | 信函日期（frontmatter letter.date） |
-| `letter.subject` | str | `` | 信函主题（frontmatter letter.subject） |
-| `letter.salutation` | str | `` | 称呼（frontmatter letter.salutation） |
-| `letter.closing` | str | `` | 落款敬语（frontmatter letter.closing） |
-| `letter.signature` | str | `` | 署名（frontmatter letter.signature） |
 
 ## 各 Kind 的覆盖
 
@@ -98,7 +90,7 @@
 | `novel.dropcap` | — | — | — | — | `False` | `False` | `True` |
 | `page.margin` | — | — | `3cm` | — | `2cm` | `2.4cm` | `2.2cm` |
 | `page.paper` | — | — | — | — | `6x9` | `a4` | `a5` |
-| `semantic.numbering` | `none` | — | — | — | — | `1.1` | — |
+| `semantic.numbering` | `none` | — | — | — | — | `1` | — |
 | `text.first-line-indent` | `0em` | `0em` | `0em` | `0em` | `2em` | `2em` | `2em` |
 | `text.leading` | — | — | — | `0.6em` | — | — | — |
 | `text.paragraph-spacing` | `1em` | `0.9em` | `1.2em` | `0.5em` | `0.45em` | `0.35em` | `0.45em` |

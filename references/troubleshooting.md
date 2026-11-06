@@ -73,6 +73,23 @@ warning: unknown font family: ...
 - 或缩小字号：`--set text.size=10pt`；
 - 或删掉不必要的列。
 
+### 公式 / 图表没有编号
+
+编号默认关闭或只有单级：
+
+```bash
+--set math.numbering="(1)"      # 公式显示 (1)
+--set float.numbering="1"       # 图表显示 1
+```
+
+编号格式按单级计数器解释：`1.1` 只会显示 `1`。需要分级编号时，用编号格式本身表达不了，暂不支持。
+
+### 某个旋钮设了没反应
+
+1. 用 `python scripts/build_pdf.py style doc.md` 看解析后的最终值——优先级高的来源可能覆盖了它。
+2. 检查名字是否拼错：拼错会直接报错，不会静默忽略。
+3. 确认这个旋钮确实存在：[style-knobs.md](style-knobs.md) 是脚本从 schema 生成的，与代码同步。
+
 ### 目录是空的
 
 - `toc.enabled` 是 `false`（letter / article 默认关闭）；

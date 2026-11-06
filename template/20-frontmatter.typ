@@ -26,7 +26,7 @@
     page(header: none, footer: none, numbering: none, fill: accent)[
       #pad(left: 2.4cm, right: 2.4cm, top: 3.2cm, bottom: 2.6cm)[
         #grid(rows: (auto, 1fr, auto), {
-          text(size: 9pt, fill: white, tracking: 0.18em, upper("report"))
+          text(size: 9pt, fill: white, tracking: 0.18em, upper(st.kind))
         }, {
           v(2cm)
           if present(meta.has-title) [
@@ -97,7 +97,7 @@
 
 #let article-head(meta, st) = {
   align(center)[
-    #text(size: 22pt, weight: "bold", fill: st.color.ink, meta.title)
+    #text(size: st.heading.size-1, weight: "bold", fill: st.color.ink, meta.title)
     #if present(meta.has-subtitle) [
       #v(0.4cm)
       #text(size: 13pt, fill: st.color.muted, meta.subtitle)

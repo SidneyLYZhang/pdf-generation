@@ -2,7 +2,12 @@
 
 #let __header(st, meta) = context {
   let page-no = here().page()
-  let chapters = query(heading.where(level: 1).before(here()))
+  // Include headings that start on this page: at a chapter opening the
+  // heading follows the header in document order, and the header should
+  // already name the new chapter.
+  let chapters = query(heading.where(level: 1)).filter(
+    h => h.location().page() <= page-no,
+  )
   let chapter = if chapters.len() > 0 { chapters.last().body } else { none }
   let title = if present(meta.has-title) { meta.title } else { none }
   let entry = none
@@ -94,7 +99,6 @@
   set page(
     ..paper-args(st),
     margin: page-margin(st),
-    columns: st.page.columns,
     numbering: if outside-numbers { none } else { page-numbering(st) },
     number-align: number-align-of(st),
     header: if st.furniture.header == "none" { none } else { __header(st, meta) },
@@ -119,6 +123,7 @@
     size: st.text.size,
     fill: st.color.ink,
     lang: st.text.lang,
+    hyphenate: st.text.hyphenate,
   )
   set par(
     justify: st.text.justify,
@@ -148,10 +153,15 @@
   show figure.where(kind: table): set figure.caption(
     position: if st.float.table-caption == "top" { top } else { bottom },
   )
-  show figure.where(kind: image): set figure.caption(
-    position: if st.float.figure-caption == "top" { top } else { bottom },
-  )
+  show figure.where(kind: image): it => {
+    set figure.caption(position: if st.float.figure-caption == "top" { top } else { bottom })
+    set image(width: st.float.figure-width)
+    it
+  }
   set figure(numbering: if st.float.numbering == "none" { none } else { st.float.numbering })
+  set math.equation(
+    numbering: if st.math.numbering == "none" { none } else { st.math.numbering },
+  )
   set table(
     stroke: (
       top: 0.8pt + st.color.rule,

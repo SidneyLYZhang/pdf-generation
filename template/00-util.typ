@@ -29,8 +29,8 @@
     st.page.margin
   } else {
     (
-      inside: st.page.margin + g / 2,
-      outside: st.page.margin - g / 2,
+      inside: st.page.margin + g,
+      outside: st.page.margin,
       top: st.page.margin,
       bottom: st.page.margin,
     )
@@ -57,6 +57,3 @@
   line(length: 100%, stroke: weight + st.color.rule)
 }
 
-#let small-caps-label(body, st) = {
-  text(size: 8.5pt, fill: st.color.muted, tracking: 0.06em, body)
-}

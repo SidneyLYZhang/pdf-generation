@@ -17,7 +17,7 @@
     radius: 2.5pt,
     stroke: (left: 2.4pt + st.color.accent),
   )[
-    #text(weight: "bold", fill: st.color.accent)[#label#if show-number [ #context sem-counter.display("1")]#if title != none [：#title]]
+    #text(weight: "bold", fill: st.color.accent)[#label#if show-number [ #context sem-counter.display(st.semantic.numbering)]#if title != none [：#title]]
     #v(0.45em)
     #body
   ]

@@ -16,6 +16,7 @@ doctor   Verify pandoc/typst/font availability.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import re
@@ -44,7 +45,6 @@ KNOBS: dict[str, tuple[str, object]] = {
     "page.paper": ("paper", "a4"),
     "page.margin": ("length", "2.5cm"),
     "page.gutter": ("length", "0cm"),
-    "page.columns": ("int", 1),
     # text -------------------------------------------------------------------
     "text.font": ("fontlist", "auto"),
     "text.heading-font": ("fontlist", "auto"),
@@ -91,7 +91,7 @@ KNOBS: dict[str, tuple[str, object]] = {
     # floats -----------------------------------------------------------------
     "float.figure-caption": ("captionpos", "bottom"),
     "float.table-caption": ("captionpos", "top"),
-    "float.numbering": ("numbering", "1.1"),
+    "float.numbering": ("numbering", "1"),
     "float.figure-width": ("ratio", "82%"),
     # code -------------------------------------------------------------------
     "code.theme": ("codetheme", "default"),
@@ -100,17 +100,10 @@ KNOBS: dict[str, tuple[str, object]] = {
     # math -------------------------------------------------------------------
     "math.numbering": ("numbering", "none"),
     # semantic blocks --------------------------------------------------------
-    "semantic.numbering": ("numbering", "1.1"),
+    "semantic.numbering": ("numbering", "1"),
     # kind specific ----------------------------------------------------------
     "novel.dropcap": ("bool", "auto"),
     "novel.chapter-prefix": ("bool", "auto"),
-    "letter.sender": ("str", ""),
-    "letter.recipient": ("str", ""),
-    "letter.date": ("str", ""),
-    "letter.subject": ("str", ""),
-    "letter.salutation": ("str", ""),
-    "letter.closing": ("str", ""),
-    "letter.signature": ("str", ""),
 }
 
 PALETTES: dict[str, dict[str, str]] = {
@@ -248,7 +241,7 @@ PRESETS: dict[str, dict[str, object]] = {
         "text.paragraph-spacing": "0.35em",
         "text.first-line-indent": "2em",
         "text.size": "11pt",
-        "semantic.numbering": "1.1",
+        "semantic.numbering": "1",
         "novel.dropcap": False,
         "novel.chapter-prefix": False,
     },
@@ -341,7 +334,7 @@ def _scalar(text: str) -> object:
         return True
     if low in ("false", "no", "off"):
         return False
-    if low in ("null", "~", "none"):
+    if low in ("null", "~"):
         return None
     if re.fullmatch(r"-?\d+", text):
         return int(text)
@@ -451,7 +444,18 @@ def flatten(prefix: str, data: dict, out: dict) -> None:
 def detect_lang(text: str) -> str:
     cjk = len(CJK_RE.findall(text))
     latin = len(LATIN_WORD_RE.findall(text))
-    return "zh" if cjk >= max(20, latin * 0.2) else "en"
+    return "zh" if cjk >= 10 and cjk >= latin * 0.5 else "en"
+
+
+ENUMS: dict[str, tuple[set[str], str]] = {
+    "paper": (PAPERS, "纸张"),
+    "palette": (set(PALETTES), "配色"),
+    "coverstyle": (COVER_STYLES, "封面样式"),
+    "pagenumber": (PAGE_NUMBERS, "页码位置"),
+    "header": (HEADERS, "页眉模式"),
+    "captionpos": (CAPTION_POS, "题注位置"),
+    "codetheme": (CODE_THEMES, "代码主题"),
+}
 
 
 def coerce(path: str, value: object) -> object:
@@ -470,11 +474,20 @@ def coerce(path: str, value: object) -> object:
         try:
             return int(value)
         except (TypeError, ValueError):
-            raise SpecError(f"{path} 需要整数，收到 {value!r}")
+            raise SpecError(f"{path} 需要整数，收到 {value!r}") from None
     if typ == "fontlist":
         if isinstance(value, list):
             return [str(v) for v in value]
-        return [part.strip() for part in str(value).split(",") if part.strip()]
+        raw = str(value).strip()
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+            except ValueError:
+                raise SpecError(f"{path} 的字体列表格式不对，收到 {value!r}") from None
+            if not isinstance(parsed, list):
+                raise SpecError(f"{path} 需要字体数组，收到 {value!r}")
+            return [str(v) for v in parsed]
+        return [part.strip() for part in raw.split(",") if part.strip()]
     if typ in ("length", "ratio"):
         s = str(value).strip()
         if typ == "length" and not re.fullmatch(r"-?\d+(\.\d+)?(pt|cm|mm|in|em|%|ch)", s):
@@ -489,50 +502,27 @@ def coerce(path: str, value: object) -> object:
         if not re.fullmatch(r"#?[0-9a-fA-F]{6}", s):
             raise SpecError(f"{path} 需要 6 位十六进制颜色（如 #22645E），收到 {value!r}")
         return s if s.startswith("#") else f"#{s}"
-    if typ == "paper":
+    if typ in ENUMS:
+        allowed, label = ENUMS[typ]
         s = str(value).lower()
-        if s not in PAPERS:
-            raise SpecError(f"{path} 只能是 {', '.join(sorted(PAPERS))}，收到 {value!r}")
-        return s
-    if typ == "palette":
-        s = str(value).lower()
-        if s not in PALETTES:
-            raise SpecError(f"{path} 只能是 {', '.join(PALETTES)}，收到 {value!r}")
-        return s
-    if typ == "coverstyle":
-        s = str(value).lower()
-        if s not in COVER_STYLES:
-            raise SpecError(f"{path} 只能是 {', '.join(sorted(COVER_STYLES))}，收到 {value!r}")
-        return s
-    if typ == "pagenumber":
-        s = str(value).lower()
-        if s not in PAGE_NUMBERS:
-            raise SpecError(f"{path} 只能是 {', '.join(sorted(PAGE_NUMBERS))}，收到 {value!r}")
-        return s
-    if typ == "header":
-        s = str(value).lower()
-        if s not in HEADERS:
-            raise SpecError(f"{path} 只能是 {', '.join(sorted(HEADERS))}，收到 {value!r}")
-        return s
-    if typ == "captionpos":
-        s = str(value).lower()
-        if s not in CAPTION_POS:
-            raise SpecError(f"{path} 只能是 top 或 bottom，收到 {value!r}")
-        return s
-    if typ == "codetheme":
-        s = str(value).lower()
-        if s not in CODE_THEMES:
-            raise SpecError(f"{path} 只能是 default 或 none，收到 {value!r}")
+        if s not in allowed:
+            raise SpecError(f"{path} 只能是 {', '.join(sorted(allowed))}，收到 {value!r}")
         return s
     if typ == "numbering":
         s = str(value).strip()
-        if s != "none" and not re.fullmatch(r"[0-9A-Za-z.()（）第章]+", s):
-            raise SpecError(f"{path} 需要 Typst numbering 格式（如 1.1 / 1.a / none），收到 {value!r}")
+        if s != "none" and not re.fullmatch(r"[0-9A-Za-z.()\-]+", s):
+            raise SpecError(f"{path} 需要 Typst numbering 格式（如 1 / 1.1 / (1) / none），收到 {value!r}")
+        return s
+    if path == "furniture.page-number-format":
+        s = str(value).strip()
+        if not re.fullmatch(r"[0-9A-Za-z.()\-]+", s):
+            raise SpecError(f"{path} 需要 Typst numbering 格式（如 1 / a / i），收到 {value!r}")
         return s
     return str(value)
 
 
-def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str) -> dict:
+def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
+                  notes: list[str] | None = None) -> dict:
     flat = {path: default for path, (_, default) in KNOBS.items()}
     flat["kind"] = kind
 
@@ -560,6 +550,10 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str) -> dict
         else:
             raise SpecError(f"未知样式项 {key!r}（--set 可用 style 子命令查看清单）")
     for key, value in entries.items():
+        if key not in KNOBS:
+            near = difflib.get_close_matches(key, list(KNOBS), n=3)
+            hint = f"，是不是 {', '.join(near)}？" if near else ''
+            raise SpecError(f'未知样式项 {key!r}{hint}')
         flat[key] = coerce(key, value)
 
     for raw in sets:
@@ -568,7 +562,6 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str) -> dict
         key, _, value = raw.partition("=")
         key = key.strip()
         if key not in KNOBS:
-            import difflib
             near = difflib.get_close_matches(key, list(KNOBS), n=3)
             hint = f"，是不是 {', '.join(near)}？" if near else ""
             raise SpecError(f"未知样式项 {key!r}{hint}")
@@ -598,6 +591,8 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str) -> dict
         flat["toc.enabled"] = kind in ("report", "book", "textbook", "novel")
     if flat["toc.depth"] == "auto":
         flat["toc.depth"] = {"textbook": 3, "novel": 1}.get(kind, 2)
+    if not isinstance(flat["toc.depth"], int) or not 1 <= flat["toc.depth"] <= 6:
+        raise SpecError(f"toc.depth 需要 1–6 的整数，收到 {flat['toc.depth']!r}")
     if flat["toc.title"] == "auto":
         flat["toc.title"] = "目录"
     if flat["furniture.header"] == "auto":
@@ -610,11 +605,41 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str) -> dict
         flat["novel.chapter-prefix"] = kind == "novel"
 
     # Typst 0.15 places the next paragraph half a line too high when the
-    # paragraph spacing is (near) zero, which makes the lines collide.
-    if re.fullmatch(r"0(\.0+)?\s*(pt|em|cm|mm|in)", str(flat["text.paragraph-spacing"])):
-        flat["text.paragraph-spacing"] = "4.5pt"
+    # paragraph spacing drops below ~4.5pt, which makes lines collide.
+    original_spacing = str(flat["text.paragraph-spacing"])
+    spacing, clamped = clamp_paragraph_spacing(original_spacing, str(flat["text.size"]))
+    flat["text.paragraph-spacing"] = spacing
+    if clamped and notes is not None:
+        notes.append(
+            f"段距 {original_spacing} 低于 4.5pt，已抬到 4.5pt（Typst 0.15 会压字）"
+        )
 
     return nested(flat)
+
+
+def length_pt(value: str, font_pt: float) -> float | None:
+    """Resolve a Typst length to points; `em`/`%` use the given font size."""
+    match = re.fullmatch(r"(-?\d+(?:\.\d+)?)(pt|cm|mm|in|em|%)", str(value).strip())
+    if not match:
+        return None
+    amount, unit = float(match.group(1)), match.group(2)
+    factor = {
+        "pt": 1.0,
+        "cm": 72 / 2.54,
+        "mm": 72 / 25.4,
+        "in": 72.0,
+        "em": font_pt,
+        "%": font_pt / 100,
+    }[unit]
+    return amount * factor
+
+
+def clamp_paragraph_spacing(spacing: str, font_size: str) -> tuple[str, bool]:
+    font_pt = length_pt(font_size, 10.0) or 10.0
+    spacing_pt = length_pt(spacing, font_pt)
+    if spacing_pt is not None and spacing_pt < 4.5:
+        return "4.5pt", True
+    return spacing, False
 
 
 def nested(flat: dict) -> dict:
@@ -710,6 +735,27 @@ def body_typst(inputs: list[Path], from_fmt: str, kind: str) -> str:
     return run(cmd).stdout
 
 
+def absolutize_images(body: str, base: Path) -> str:
+    """Make `image("relative")` absolute so the .typ renders from any directory.
+
+    Typst resolves paths relative to the .typ file; the .typ is written next to
+    the requested PDF, which may be elsewhere.  Typst 0.15 also requires forward
+    slashes in paths.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group(1)
+        if re.match(r"^[A-Za-z]:[\\/]", raw) or raw.startswith(("/", "\\\\")) or "://" in raw:
+            return f'image("{raw.replace(chr(92), "/")}"'
+        candidate = base / raw
+        if not candidate.exists():
+            # Keep the original text: it may be a code sample, not an asset.
+            return match.group(0)
+        return f'image("{candidate.resolve().as_posix()}"'
+
+    return re.sub(r'image\("([^"]+)"', replace, body)
+
+
 # --------------------------------------------------------------------------- #
 # Composition
 # --------------------------------------------------------------------------- #
@@ -725,9 +771,10 @@ def template_source() -> str:
 
 def compose(typ_path: Path, meta_snippet: str, letter_ty: str, style: dict, body: str) -> None:
     header = (
-        "// Generated by the pdf-generation skill. Do not edit: regenerate with\n"
-        "// scripts/build_pdf.py. Everything below is self-contained so this file\n"
-        "// can be compiled directly:  typst compile <this file>\n"
+        "// Generated by the pdf-generation skill. Rebuilding overwrites this\n"
+        "// file; to hand-edit it, build once, edit, then rerun with --keep-typ.\n"
+        "// Everything here is self-contained, so `typst compile <this file>`\n"
+        "// reproduces the PDF without the skill.\n"
     )
     style_lit = typst_dict(style, KNOBS)
     text = "\n".join([
@@ -817,13 +864,14 @@ def pick_samples(total: int, mode: str) -> list[int]:
         return list(range(1, total + 1))
     if total == 1:
         return [1]
-    # One representative content page: the middle of the document, never the
-    # cover.  The cover is only sampled when the check widens.
-    middle = max(2, min(total, round(total * 0.5)))
-    return [middle]
+    # Front matter (cover, table of contents) occupies the first pages, so a
+    # page at 60% of the document lands in the body; short documents fall back
+    # to their last page.
+    page = min(total, max(3, round(total * 0.6)))
+    return [page]
 
 
-def render_samples(typ: Path, total: int, samples: list[int], preview: Path,
+def render_samples(typ: Path, samples: list[int], preview: Path,
                    ppi: int = 100) -> list[Path]:
     if not samples:
         return []
@@ -855,12 +903,13 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         raise SpecError(f"找不到样式文件 {doc_path}")
 
     fm = read_frontmatter(first)
-    chosen = kind or doc_spec.get("kind") or fm.get("kind") or "report"
+    chosen = kind or fm.get("kind") or doc_spec.get("kind") or "report"
     if chosen not in KINDS:
         raise SpecError(f"未知 Kind {chosen!r}，可选：{', '.join(KINDS)}")
 
     lang = detect_lang("\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs))
-    style = resolve_style(str(chosen), doc_spec, sets, lang)
+    notes: list[str] = []
+    style = resolve_style(str(chosen), doc_spec, sets, lang, notes)
 
     out_pdf = out_pdf or first.with_suffix(".pdf")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -871,7 +920,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
     else:
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
-        body = body_typst(inputs, from_fmt, str(chosen))
+        body = absolutize_images(body_typst(inputs, from_fmt, str(chosen)), first.parent)
         compose(typ_path, meta, letter_snippet(fm), style, body)
 
     proc = run(["typst", "compile", str(typ_path), str(out_pdf)], check=False)
@@ -886,7 +935,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         samples = sorted(set(samples + extra))
     preview = out_pdf.parent / ".pdfgen" / out_pdf.stem
     try:
-        rendered = render_samples(typ_path, total, samples, preview)
+        rendered = render_samples(typ_path, samples, preview)
     except SpecError as exc:
         warnings.append(f"抽页渲染失败：{exc}")
         rendered = []
@@ -899,13 +948,16 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         "pages": total,
         "samples": [str(p) for p in rendered],
         "warnings": warnings,
+        "notes": notes,
+        "source": body_note,
         "duration": round(time.time() - started, 2),
-        "notes": body_note,
     }
     if not quiet:
         print(f"PDF   {out_pdf}  ({total} 页, {result['duration']}s)")
         print(f"TYP   {typ_path}")
         print(f"Kind  {chosen}   语言 {lang}   纸张 {style['page']['paper']}")
+        for note in notes:
+            print(f"i     {note}")
         for warning in warnings:
             print(f"!     {warning}")
         for sample in rendered:
@@ -999,6 +1051,20 @@ def cmd_style(args) -> int:
     return 0
 
 
+def _yaml_scalar(value: object) -> str:
+    """Quote only what a YAML reader could misread."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    safe = re.fullmatch(r"[A-Za-z0-9_.\-/]+", text) is not None
+    reserved = text.lower() in {"true", "false", "yes", "no", "on", "off", "null", "none", "~"}
+    if text and safe and not reserved:
+        return text
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def to_yaml(data: dict, indent: int = 0) -> str:
     pad = " " * indent
     lines = []
@@ -1009,11 +1075,9 @@ def to_yaml(data: dict, indent: int = 0) -> str:
         elif isinstance(value, list):
             lines.append(f"{pad}{key}:")
             for item in value:
-                lines.append(f"{pad}  - {item}")
-        elif isinstance(value, bool):
-            lines.append(f"{pad}{key}: {'true' if value else 'false'}")
+                lines.append(f"{pad}  - {_yaml_scalar(item)}")
         else:
-            lines.append(f"{pad}{key}: {value}")
+            lines.append(f"{pad}{key}: {_yaml_scalar(value)}")
     return "\n".join(lines)
 
 
@@ -1029,7 +1093,9 @@ def cmd_check(args) -> int:
     total = page_count(typ)
     samples = pick_samples(total, args.check)
     preview = typ.parent / ".pdfgen" / typ.stem
-    rendered = render_samples(typ, total, samples, preview)
+    if preview.exists():
+        shutil.rmtree(preview, ignore_errors=True)
+    rendered = render_samples(typ, samples, preview)
     print(f"页数 {total}")
     for warning in warnings:
         print(f"! {warning}")
@@ -1099,7 +1165,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--output")
     p.add_argument("--kind", choices=KINDS)
     p.add_argument("--set", action="append", metavar="KEY=VALUE")
-    p.add_argument("--doc", help="Style spec 文件（默认 <stdin>.doc.yml）")
+    p.add_argument("--doc", help="Style spec 文件（默认 <首个输入文件>.doc.yml）")
     p.add_argument("--from", dest="from_format", default="gfm+fenced_divs")
     p.add_argument("--check", choices=("none", "sample", "all"), default="sample")
     p.add_argument("--keep-typ", action="store_true", help="不重新生成 .typ，直接编译")

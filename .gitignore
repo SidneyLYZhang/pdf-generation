@@ -10,6 +10,7 @@ examples/**/*.typ
 # 临时目录
 .tmpcheck/
 .scratch/
+.pdfgen-test-*/
 
 # OS
 .DS_Store
