@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# 构建产物（.typ 每次都重新生成，不入库）
+.pdfgen/
+examples/**/*.typ
+*.pdfgen/
+
+# 临时目录
+.tmpcheck/
+.scratch/
+
+# OS
+.DS_Store
+Thumbs.db
