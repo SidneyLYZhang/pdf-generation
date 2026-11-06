@@ -1,0 +1,43 @@
+name: Release
+
+# 推送 v* 标签即发布 Release，Release 正文就是标签自身的说明文字。
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read tag message
+        id: tag
+        run: |
+          git fetch --tags --force
+          message="$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}")"
+          if [ -z "$message" ]; then
+            message="$(git log -1 --pretty=%B)"
+          fi
+          {
+            echo "body<<__TAG_MESSAGE_END__"
+            printf '%s\n' "$message"
+            echo "__TAG_MESSAGE_END__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.tag.outputs.body }}
+          draft: false
+          prerelease: false
+          make_latest: true
