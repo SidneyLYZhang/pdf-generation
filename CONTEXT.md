@@ -36,6 +36,30 @@ _Avoid_: 教材、teaching material
 带封面、章首装饰、首字下沉与段首缩进，标题不编号的小说版式。
 _Avoid_: 小说、fiction
 
+**Citation**:
+正文里指向一条参考条目的标注，写作 `[@key]`，显示形式（编号或「作者-年」）由 CSL 样式决定。
+_Avoid_: 引用、reference
+
+**Bibliography**:
+文末的参考条目列表，数据来自 frontmatter 声明的 `.bib` / CSL-JSON / Hayagriva 文件。
+_Avoid_: 文献表、参考文献列表、refs
+
+**Cross-reference**:
+正文里指向图、表、公式、节的标注，写作 `@fig:…` / `@tab:…` / `@eq:…` / `@sec:…`，编号由模板生成。
+_Avoid_: 引用、ref、xref
+
+**Sidenote**:
+排在页边的注释；由显式标记或 `note.style` 触发，宽度来自加宽后的外侧页边。
+_Avoid_: 旁注、marginnote、margin note
+
+**Diagram**:
+由 `mermaid` / `dot` 围栏在构建期预渲染成 SVG 的图，与图片共用题注与编号。
+_Avoid_: 流程图、chart
+
+**Chess diagram**:
+由 `fen` / `pgn` 围栏经 staunton 排出的棋盘图，自带题注与编号。
+_Avoid_: 棋谱图、board
+
 **Style spec**:
 用户可调的排版参数集合，是某一文档排版的唯一事实源。
 _Avoid_: 样式表、样式文件、style.typ、配置

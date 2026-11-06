@@ -1,6 +1,6 @@
 # Markdown 写法
 
-解析器是 pandoc，方言为 **GFM + fenced_divs**（`-f gfm+fenced_divs`）。GFM 让「冒号后面的列表」直接成列表，省掉一类历史遗留的排版事故。
+解析器是 pandoc，方言是一条钉死的 pandoc markdown 扩展串（`scripts/build_pdf.py` 里的 `FROM_FORMAT`，可用 `--from` 覆盖）。它保留了 GFM 的手感——「冒号后面的列表」仍然直接成列表，同时打开引文、属性与图片题注。
 
 ## 标题与结构
 
@@ -85,14 +85,15 @@ pandoc 负责把 LaTeX 翻成 Typst 数学：`\frac{a}{b}` → `a/b`，`\alpha` 
 ## 图片
 
 ```markdown
-![图 1：渠道效率](img/channels.png){width=70%}
+![渠道效率](img/channels.png){width=70%}
 ```
 
+- 单独成段的图片会变成带题注的 figure，题注取 alt 文字；编号（「图 1」）由模板自动加，**alt 里不要再写「图 1：」**，否则会出现「图 1 图 1：渠道效率」。
+- `{width=70%}` 控制宽度；省略时用 `float.figure-width` 的默认值（82%）。
 - 路径相对 Markdown 文件。
-- 省略 `width` 时用 `float.figure-width` 的默认值（82%）。
 - 图片找不到时 Typst 会报错并打印解析后的路径，先查相对路径。
 
-## 脚注与引用
+## 脚注与块引用
 
 ```markdown
 正文[^1]。
@@ -101,6 +102,53 @@ pandoc 负责把 LaTeX 翻成 Typst 数学：`\frac{a}{b}` → `a/b`，`\alpha` 
 ```
 
 `>` 块引用会渲染成左侧竖线的弱化引文。
+
+## 引文与书目
+
+在 frontmatter 声明书目文件，正文用 `[@key]` 标注引文：
+
+```yaml
+---
+title: 报告
+bibliography: refs.bib
+---
+```
+
+```markdown
+已有研究指出[@doe2020]，另一项工作给出了不同结论[@smith2021]。
+带页码定位：[@doe2020, p. 33]。
+```
+
+- 数据文件支持 `.bib`（BibTeX）、`.json`（CSL-JSON）、`.yml`（Hayagriva），路径相对 Markdown。
+- `cite.enabled` 默认 `auto`：声明了 `bibliography` 才生成参考文献表；想关掉设成 `false`。
+- 默认样式：中文 `gb-7714-2015-numeric`，英文 `ieee`，`article` 用 `apa`。换成内置样式名或 `.csl` 路径：`--set cite.style=apa`、`cite.style: vancouver`。
+- 标题默认「参考文献 / References」，进目录；`cite.title` 可改。
+- 缺书目文件、缺 key 都会让构建失败并指出名字，不会静默排出裸 key。
+- 坑：`gb-7714-2015-numeric` 不显示页码定位（CSL 实现所限），需要页码就用 `ieee` / `apa`，或把页码写进正文。
+
+## 交叉引用
+
+给图、表、公式、节打标签，正文用 `@` 标注指向它们：
+
+```markdown
+# 方法 {#sec:method}
+
+![渠道效率](img/channels.png){#fig:channels}
+
+: 槽位表 {#tab:slots}
+
+| 渠道 | 槽位 |
+|------|-----:|
+
+$$ y = mx + b \label{eq:line} $$
+
+见图 @fig:channels、表 @tab:slots、式 @eq:line，见 @sec:method。
+```
+
+- 保留前缀只有四个：`fig:` `tab:` `eq:` `sec:`。**其余 `@id` 一律当引文**，所以书目 key 别用这四个前缀。
+- 编号文字由 Typst 生成（「图 1」「表 1」「式 1」「小节 1」），不要在正文里手写。
+- 指向不存在的 id 会构建失败并打印那个 id。
+- 公式必须先有编号才能被指向：`math.numbering` 为 `none` 时会直接报错，用 `--set math.numbering=(1)` 打开。
 
 ## frontmatter 元数据
 
@@ -111,6 +159,7 @@ pandoc 负责把 LaTeX 翻成 Typst 数学：`\frac{a}{b}` → `a/b`，`\alpha` 
 | `author` | 作者；多个用 YAML 列表 |
 | `org` | 机构（封面显示为「机构」） |
 | `date` | 日期文本，原样显示，不做格式化 |
+| `bibliography` | 书目文件路径（`.bib` / CSL-JSON / Hayagriva），见「引文与书目」 |
 | `abstract` / `keywords` | 仅 `article` 使用 |
 | `letter:` | 仅 `letter` 使用，见 [kinds.md](kinds.md) |
 

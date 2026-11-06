@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" version="1.0" class="in-text" default-locale="en-US">
+  <info>
+    <title>Minimal Test Style</title>
+    <id>http://example.com/minimal-test</id>
+    <updated>2026-01-01T00:00:00+00:00</updated>
+  </info>
+  <citation>
+    <layout prefix="[" suffix="]" delimiter=", ">
+      <text variable="citation-number"/>
+    </layout>
+  </citation>
+  <bibliography>
+    <layout>
+      <text variable="title"/>
+    </layout>
+  </bibliography>
+</style>

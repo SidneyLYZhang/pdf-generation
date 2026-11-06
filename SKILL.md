@@ -5,7 +5,7 @@ description: 把 Markdown 排成 PDF：pandoc 只解析，Typst 负责版式，�
 
 # PDF Generation
 
-pandoc 把 Markdown 解析成 Typst 源码（`-f gfm -t typst`），版式由本 skill 自带的模板承担，`typst` 直接渲染 PDF。七种 Kind、一个 Style spec、一条固定流程。
+pandoc 把 Markdown 解析成 Typst 源码（`-f` 默认是钉死的 pandoc markdown 扩展串，见 `--from`），版式由本 skill 自带的模板承担，`typst` 直接渲染 PDF。七种 Kind、一个 Style spec、一条固定流程。
 
 流程固定为六步；每一步的末尾给了完成判据，判据不成立就不进入下一步。
 

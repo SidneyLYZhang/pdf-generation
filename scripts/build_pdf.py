@@ -2,7 +2,8 @@
 """pdf-generation: Markdown -> PDF, parsed by pandoc, laid out by Typst.
 
 The bundled template in ``template/`` owns every layout decision.  pandoc is
-used only as a Markdown parser (``-f gfm -t typst``); Typst renders the PDF.
+used only as a Markdown parser (the dialect pinned in ``FROM_FORMAT``); Typst
+renders the PDF.
 
 Subcommands
 -----------
@@ -31,8 +32,28 @@ SKILL_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = SKILL_ROOT / "template"
 META_TEMPLATE = TEMPLATE_DIR / "meta.typ"
 LUA_FILTER = SKILL_ROOT / "filters" / "semantic.lua"
+# Vendored Typst Universe packages (ADR-0005).  Typst resolves `@preview/...`
+# imports here when `--package-path` points at it, so no network is needed.
+VENDOR_PACKAGES = SKILL_ROOT / "vendor" / "typst-packages"
+# Pinned by ADR-0005; change here and in the vendored directory together.
+STAUNTON_VERSION = "2.0.0"
 
 KINDS = ("report", "article", "letter", "note", "book", "textbook", "novel")
+
+# The Markdown dialect is a pinned constant, not pandoc's default, so that a
+# pandoc upgrade cannot silently change how documents parse (ADR-0003).
+#   +lists_without_preceding_blankline  keep GFM's "list right after a colon line"
+#   +fenced_divs                        ::: semantic blocks and page breaks
+#   +bracketed_spans                    inline margin notes [text]{.marginnote}
+#   +fenced_code_attributes             fence options: {line-numbers}, chess options
+#   +citations                          [@key] citations and @fig: cross-references
+#   +implicit_figures                   a lone image becomes a captioned figure
+#   -smart                              no curly quotes / dash substitution
+#   -raw_tex -latex_macros              unsupported LaTeX stays visible text
+FROM_FORMAT = (
+    "markdown+lists_without_preceding_blankline+fenced_divs+bracketed_spans"
+    "+fenced_code_attributes+citations+implicit_figures-smart-raw_tex-latex_macros"
+)
 
 # --------------------------------------------------------------------------- #
 # Style spec
@@ -99,6 +120,10 @@ KNOBS: dict[str, tuple[str, object]] = {
     "code.header": ("bool", True),
     # math -------------------------------------------------------------------
     "math.numbering": ("numbering", "none"),
+    # citations --------------------------------------------------------------
+    "cite.enabled": ("bool", "auto"),
+    "cite.style": ("str", "auto"),
+    "cite.title": ("str", "auto"),
     # semantic blocks --------------------------------------------------------
     "semantic.numbering": ("numbering", "1"),
     # kind specific ----------------------------------------------------------
@@ -522,7 +547,7 @@ def coerce(path: str, value: object) -> object:
 
 
 def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
-                  notes: list[str] | None = None) -> dict:
+                  notes: list[str] | None = None, has_bibliography: bool = False) -> dict:
     flat = {path: default for path, (_, default) in KNOBS.items()}
     flat["kind"] = kind
 
@@ -603,6 +628,20 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
         flat["novel.dropcap"] = kind == "novel"
     if flat["novel.chapter-prefix"] == "auto":
         flat["novel.chapter-prefix"] = kind == "novel"
+    if flat["cite.enabled"] == "auto":
+        flat["cite.enabled"] = has_bibliography
+    # `text.lang` is already resolved (auto → the detected language), so a
+    # `--set text.lang=en` also moves the citation defaults with it.
+    chinese = str(flat["text.lang"]).startswith("zh")
+    if flat["cite.style"] == "auto":
+        # Article-like documents follow author-date convention; numeric styles
+        # are the safe default for reports and books.
+        if kind == "article":
+            flat["cite.style"] = "apa"
+        else:
+            flat["cite.style"] = "gb-7714-2015-numeric" if chinese else "ieee"
+    if flat["cite.title"] == "auto":
+        flat["cite.title"] = "参考文献" if chinese else "References"
 
     # Typst 0.15 places the next paragraph half a line too high when the
     # paragraph spacing drops below ~4.5pt, which makes lines collide.
@@ -716,14 +755,20 @@ def read_frontmatter(path: Path) -> dict:
     return found
 
 
+def pandoc_stdout(cmd: list[str], from_fmt: str) -> str:
+    proc = run(cmd, check=False)
+    if proc.returncode != 0:
+        raise SpecError(pandoc_error(proc, from_fmt))
+    return proc.stdout
+
+
 def pandoc_meta(path: Path, from_fmt: str) -> str:
     """Render metadata into a typst `#let meta = (...)` snippet."""
     need("pandoc", "安装：winget install JohnMacFarlane.Pandoc")
-    proc = run([
+    return pandoc_stdout([
         "pandoc", "-f", from_fmt, "-t", "typst",
         f"--template={META_TEMPLATE}", str(path),
-    ])
-    return proc.stdout
+    ], from_fmt)
 
 
 def body_typst(inputs: list[Path], from_fmt: str, kind: str) -> str:
@@ -732,26 +777,92 @@ def body_typst(inputs: list[Path], from_fmt: str, kind: str) -> str:
     if LUA_FILTER.exists():
         cmd += [f"--lua-filter={LUA_FILTER}"]
     cmd += [str(p) for p in inputs]
-    return run(cmd).stdout
+    return pandoc_stdout(cmd, from_fmt)
 
 
-def absolutize_images(body: str, base: Path) -> str:
-    """Make `image("relative")` absolute so the .typ renders from any directory.
+def pandoc_error(proc: subprocess.CompletedProcess, from_fmt: str) -> str:
+    """Turn pandoc's stderr into something a user can act on."""
+    message = (proc.stderr or proc.stdout).strip()
+    if "Unknown input format" in message or "is not supported" in message:
+        return (
+            f"--from 用了 pandoc 不认识的格式：{from_fmt!r}\n{message}\n"
+            "提示：默认方言已按 skill 需要钉好，通常不需要传 --from。"
+        )
+    return f"pandoc 解析失败：\n{message}"
 
-    Typst resolves paths relative to the .typ file; the .typ is written next to
-    the requested PDF, which may be elsewhere.  Typst 0.15 also requires forward
-    slashes in paths.
+
+def local_images(body: str, base: Path) -> list[Path]:
+    """Image files referenced by `image("…")` that exist on disk.
+
+    URLs and already-absolute references are left alone: they are either not
+    Typst paths at all, or come from the style spec rather than the document.
     """
-
-    def replace(match: re.Match[str]) -> str:
+    found: list[Path] = []
+    for match in re.finditer(r'image\("([^"]+)"', body):
         raw = match.group(1)
-        if re.match(r"^[A-Za-z]:[\\/]", raw) or raw.startswith(("/", "\\\\")) or "://" in raw:
-            return f'image("{raw.replace(chr(92), "/")}"'
+        if _is_external_path(raw):
+            continue
+        candidate = base / raw
+        if candidate.exists():
+            resolved = candidate.resolve()
+            if resolved not in found:
+                found.append(resolved)
+    return found
+
+
+def _is_external_path(raw: str) -> bool:
+    """URLs, Windows drive paths, and already-root-relative paths.
+
+    The last case keeps `rewrite_images` idempotent: a path the build has
+    already rewritten starts with `/` and must be left alone.
+    """
+    return bool(
+        re.match(r"^[A-Za-z]:[\\/]", raw) or raw.startswith(("/", "\\\\")) or "://" in raw
+    )
+
+
+def project_root(typ_dir: Path, assets: list[Path]) -> Path:
+    """The directory Typst gets as `--root`: it must contain the .typ and every asset.
+
+    Typst paths are root-based; Windows drive letters are not valid path
+    components, so absolute paths never work and `..` may not escape the root.
+    """
+    dirs = [str(typ_dir.resolve())] + [str(path.parent) for path in assets]
+    try:
+        return Path(os.path.commonpath(dirs))
+    except ValueError:
+        raise SpecError(
+            "图片和输出 PDF 不在同一个磁盘上，Typst 无法引用。"
+            "把 PDF 输出到图片所在的磁盘，或把图片拷进项目目录。"
+        ) from None
+
+
+def asset_path(target: Path, typ_dir: Path, root: Path) -> str:
+    """A Typst-usable path: plain relative when inside the .typ tree, else root-relative.
+
+    Relative paths keep the generated .typ compilable by hand (`typst compile
+    file.typ`); root-relative ones only appear when the asset lives outside the
+    directory the .typ was written to.
+    """
+    relative = os.path.relpath(target, typ_dir)
+    if not relative.startswith(".."):
+        return Path(relative).as_posix()
+    return "/" + Path(os.path.relpath(target, root)).as_posix()
+
+
+def rewrite_images(body: str, base: Path, typ_dir: Path, root: Path) -> str:
+    """Point every existing local image at a path Typst can resolve."""
+
+    def replace(match: re.Match) -> str:
+        raw = match.group(1)
+        if _is_external_path(raw):
+            return match.group(0)
         candidate = base / raw
         if not candidate.exists():
             # Keep the original text: it may be a code sample, not an asset.
             return match.group(0)
-        return f'image("{candidate.resolve().as_posix()}"'
+        reference = asset_path(candidate.resolve(), typ_dir, root)
+        return f'image("{reference}"'
 
     return re.sub(r'image\("([^"]+)"', replace, body)
 
@@ -769,25 +880,52 @@ def template_source() -> str:
     return "\n\n".join(parts)
 
 
-def compose(typ_path: Path, meta_snippet: str, letter_ty: str, style: dict, body: str) -> None:
+def typst_args(root: Path | None = None) -> list[str]:
+    """Options every typst invocation needs: vendored packages and project root."""
+    args: list[str] = []
+    if VENDOR_PACKAGES.exists():
+        args += ["--package-path", str(VENDOR_PACKAGES)]
+    if root:
+        args += ["--root", str(root)]
+    return args
+
+
+def root_from_typ(typ: Path) -> Path | None:
+    """Recover the project root a generated .typ was built with."""
+    try:
+        head = typ.read_text(encoding="utf-8", errors="replace")[:2000]
+    except OSError:
+        return None
+    match = re.search(r"^// pdfgen-root: (.+)$", head, re.M)
+    return Path(match.group(1).strip()) if match else None
+
+
+def compose(typ_path: Path, *, meta_ty: str, letter_ty: str, bib_ty: str, style: dict,
+            body: str, root: Path | None = None) -> None:
     header = (
         "// Generated by the pdf-generation skill. Rebuilding overwrites this\n"
         "// file; to hand-edit it, build once, edit, then rerun with --keep-typ.\n"
         "// Everything here is self-contained, so `typst compile <this file>`\n"
         "// reproduces the PDF without the skill.\n"
     )
+    if root is not None and root.resolve() != typ_path.parent.resolve():
+        # Only recorded when assets live outside the .typ's own directory: that
+        # is when paths are root-relative and `typst compile` needs --root.
+        header += f"// pdfgen-root: {root.as_posix()}\n"
     style_lit = typst_dict(style, KNOBS)
     text = "\n".join([
         header,
         template_source(),
         "",
-        meta_snippet.strip(),
+        meta_ty.strip(),
         "",
         letter_ty,
         "",
+        bib_ty,
+        "",
         f"#let style = {style_lit}",
         "",
-        "#show: doc.with(meta: meta + (letter: letter), style: style)",
+        "#show: doc.with(meta: meta + (letter: letter, bib: bib), style: style)",
         "",
         body.strip(),
         "",
@@ -805,6 +943,54 @@ def typst_plain(text: object) -> str:
     lines = [line for line in str(text).replace("\r\n", "\n").split("\n")]
     parts = [f"#text({tstr(line.strip())})" for line in lines if line.strip()]
     return "[" + "#linebreak()".join(parts) + "]"
+
+
+def bib_snippet(path: str) -> str:
+    """Describe the bibliography so the template can emit `#bibliography(...)`."""
+    if not path:
+        return '#let bib = (\n  path: "",\n  has-path: "no",\n)'
+    return (
+        "#let bib = (\n"
+        f"  path: {tstr(path)},\n"
+        '  has-path: "yes",\n'
+        ")"
+    )
+
+
+def bibliography_field(frontmatter: dict) -> str:
+    value = frontmatter.get("bibliography")
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        raise SpecError("frontmatter 的 bibliography 只支持一个文件（收到列表）")
+    return str(value).strip()
+
+
+def resolve_bibliography(frontmatter: dict, base: Path) -> Path | None:
+    raw = bibliography_field(frontmatter)
+    if not raw:
+        return None
+    path = Path(raw)
+    candidate = path if path.is_absolute() else base / path
+    if not candidate.exists():
+        raise SpecError(f"找不到书目文件 {raw}（按 {base} 解析）")
+    return candidate.resolve()
+
+
+def resolve_csl(style: str, base: Path) -> Path | None:
+    """A `cite.style` that names a CSL file rather than a built-in style."""
+    if not style or style == "auto":
+        return None
+    looks_like_file = (
+        Path(style).suffix.lower() == ".csl" or "/" in style or "\\" in style
+    )
+    if not looks_like_file:
+        return None
+    candidate = Path(style)
+    path = candidate if candidate.is_absolute() else base / candidate
+    if not path.exists():
+        raise SpecError(f"找不到 CSL 样式文件 {style}（按 {base} 解析）")
+    return path.resolve()
 
 
 def letter_snippet(frontmatter: dict) -> str:
@@ -826,8 +1012,9 @@ def letter_snippet(frontmatter: dict) -> str:
 # --------------------------------------------------------------------------- #
 # Rendering and self-check
 # --------------------------------------------------------------------------- #
-def page_count(typ: Path) -> int:
-    proc = run(["typst", "eval", "query(<pdfgen-pages>)", "--in", str(typ)], check=False)
+def page_count(typ: Path, root: Path | None = None) -> int:
+    proc = run(["typst", "eval", *typst_args(root), "query(<pdfgen-pages>)", "--in", str(typ)],
+               check=False)
     if proc.returncode != 0 or not proc.stdout.strip():
         return 0
     try:
@@ -872,13 +1059,13 @@ def pick_samples(total: int, mode: str) -> list[int]:
 
 
 def render_samples(typ: Path, samples: list[int], preview: Path,
-                   ppi: int = 100) -> list[Path]:
+                   ppi: int = 100, root: Path | None = None) -> list[Path]:
     if not samples:
         return []
     preview.mkdir(parents=True, exist_ok=True)
     pages = ",".join(str(p) for p in samples)
     run([
-        "typst", "compile", "--format", "png", f"--ppi={ppi}",
+        "typst", "compile", *typst_args(root), "--format", "png", f"--ppi={ppi}",
         "--pages", pages, str(typ), str(preview / "p{p}.png"),
     ])
     return [preview / f"p{p}.png" for p in samples if (preview / f"p{p}.png").exists()]
@@ -908,8 +1095,10 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         raise SpecError(f"未知 Kind {chosen!r}，可选：{', '.join(KINDS)}")
 
     lang = detect_lang("\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs))
+    bib_path = resolve_bibliography(fm, first.parent)
     notes: list[str] = []
-    style = resolve_style(str(chosen), doc_spec, sets, lang, notes)
+    style = resolve_style(str(chosen), doc_spec, sets, lang, notes,
+                          has_bibliography=bib_path is not None)
 
     out_pdf = out_pdf or first.with_suffix(".pdf")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -917,25 +1106,43 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
 
     if keep_typ and typ_path.exists():
         body_note = "复用已有 .typ"
+        root = root_from_typ(typ_path)
     else:
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
-        body = absolutize_images(body_typst(inputs, from_fmt, str(chosen)), first.parent)
-        compose(typ_path, meta, letter_snippet(fm), style, body)
+        raw_body = body_typst(inputs, from_fmt, str(chosen))
+        if "#ref(<eq:" in raw_body and style["math"]["numbering"] == "none":
+            raise SpecError(
+                "正文引用了公式（@eq:），但公式没有编号，Typst 无法生成引用。\n"
+                "用 --set math.numbering=(1) 打开公式编号，或在 doc.yml 里设 math.numbering。"
+            )
+        images = local_images(raw_body, first.parent)
+        csl_path = resolve_csl(str(style["cite"]["style"]), first.parent)
+        assets = images + [p for p in (bib_path, csl_path) if p]
+        root = project_root(typ_path.parent, assets)
+        if csl_path:
+            # Typst wants a root-relative or sibling path, never a drive path.
+            style["cite"]["style"] = asset_path(csl_path, typ_path.parent, root)
+        body = rewrite_images(raw_body, first.parent, typ_path.parent, root)
+        bib_ty = bib_snippet(
+            asset_path(bib_path, typ_path.parent, root) if bib_path else ""
+        )
+        compose(typ_path, meta_ty=meta, letter_ty=letter_snippet(fm), bib_ty=bib_ty,
+                style=style, body=body, root=root)
 
-    proc = run(["typst", "compile", str(typ_path), str(out_pdf)], check=False)
+    proc = run(["typst", "compile", *typst_args(root), str(typ_path), str(out_pdf)], check=False)
     warnings = parse_warnings(proc.stderr)
     if proc.returncode != 0:
         raise SpecError(f"Typst 编译失败：\n{proc.stderr.strip()}")
 
-    total = page_count(typ_path)
+    total = page_count(typ_path, root)
     samples = pick_samples(total, check_mode) if check_mode != "none" else []
     if check_mode == "sample" and warnings and total > 1:
         extra = [1, 2]
         samples = sorted(set(samples + extra))
     preview = out_pdf.parent / ".pdfgen" / out_pdf.stem
     try:
-        rendered = render_samples(typ_path, samples, preview)
+        rendered = render_samples(typ_path, samples, preview, root=root)
     except SpecError as exc:
         warnings.append(f"抽页渲染失败：{exc}")
         rendered = []
@@ -1040,7 +1247,8 @@ def cmd_style(args) -> int:
     fm = read_frontmatter(inputs[0])
     kind = args.kind or doc_spec.get("kind") or fm.get("kind") or "report"
     lang = detect_lang("\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs))
-    style = resolve_style(str(kind), doc_spec, args.set or [], lang)
+    style = resolve_style(str(kind), doc_spec, args.set or [], lang,
+                          has_bibliography=bibliography_field(fm) != "")
     text = to_yaml(style)
     if args.write:
         target = Path(args.write)
@@ -1085,17 +1293,19 @@ def cmd_check(args) -> int:
     typ = Path(args.typ)
     if not typ.exists():
         raise SpecError(f"找不到 {typ}")
-    proc = run(["typst", "compile", str(typ), str(typ.with_suffix(".pdf"))], check=False)
+    root = root_from_typ(typ)
+    proc = run(["typst", "compile", *typst_args(root), str(typ), str(typ.with_suffix(".pdf"))],
+               check=False)
     warnings = parse_warnings(proc.stderr)
     if proc.returncode != 0:
         print(proc.stderr.strip(), file=sys.stderr)
         return 1
-    total = page_count(typ)
+    total = page_count(typ, root)
     samples = pick_samples(total, args.check)
     preview = typ.parent / ".pdfgen" / typ.stem
     if preview.exists():
         shutil.rmtree(preview, ignore_errors=True)
-    rendered = render_samples(typ, samples, preview)
+    rendered = render_samples(typ, samples, preview, root=root)
     print(f"页数 {total}")
     for warning in warnings:
         print(f"! {warning}")
@@ -1128,11 +1338,54 @@ def cmd_doctor(args) -> int:
         print(f"[{mark}] 中文字体 {font}（缺失时中文会用后备字体）")
     tmp = Path(tempfile.mkdtemp(prefix="pdfgen-doctor-", dir=Path.cwd()))
     try:
+        if VENDOR_PACKAGES.exists():
+            probe = tmp / "chess.typ"
+            probe.write_text(
+                f'#import "@preview/staunton:{STAUNTON_VERSION}": board\n'
+                '#board("8/8/8/8/8/8/8/8")\n',
+                encoding="utf-8",
+            )
+            proc = run(["typst", "compile", *typst_args(), str(probe), str(tmp / "chess.pdf")],
+                       check=False)
+            if proc.returncode == 0:
+                print(f"[ok  ] 内联包 staunton {STAUNTON_VERSION}（棋谱可用，离线）")
+            else:
+                ok = False
+                first = (proc.stderr.strip().splitlines() or [""])[0]
+                print(f"[fail] 内联包 staunton 无法 import：{first}")
+        else:
+            ok = False
+            print("[fail] 缺少 vendor/typst-packages，棋谱围栏不可用（见 INSTALL.md）")
+        styles = ("gb-7714-2015-numeric", "ieee", "apa")
+        (tmp / "doctor.bib").write_text(
+            "@book{doctor, author = {Doe, John}, title = {T}, year = {2024},\n"
+            " publisher = {P}}\n",
+            encoding="utf-8",
+        )
+        missing = []
+        for style in styles:
+            probe = tmp / f"csl-{style}.typ"
+            probe.write_text(
+                f'#bibliography("doctor.bib", style: "{style}")\n#cite(<doctor>)\n',
+                encoding="utf-8",
+            )
+            proc = run(
+                ["typst", "compile", *typst_args(), str(probe), str(tmp / f"{style}.pdf")],
+                check=False,
+            )
+            if proc.returncode != 0:
+                first = (proc.stderr.strip().splitlines() or [""])[0]
+                missing.append(f"{style}（{first}）")
+        if missing:
+            ok = False
+            print(f"[fail] CSL 样式不可用：{'; '.join(missing)}")
+        else:
+            print(f"[ok  ] CSL 样式 {' / '.join(styles)}")
         sample = tmp / "doctor.md"
         sample.write_text("# 自检\n\n这是一段中文自检文字。\n", encoding="utf-8")
         try:
             result = build_one([sample], tmp / "doctor.pdf", "report", [],
-                               None, "gfm", "none", False, True)
+                               None, FROM_FORMAT, "none", False, True)
             print(f"[ok]   模板自检 {result['pages']} 页")
         except SpecError as exc:
             ok = False
@@ -1166,7 +1419,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--kind", choices=KINDS)
     p.add_argument("--set", action="append", metavar="KEY=VALUE")
     p.add_argument("--doc", help="Style spec 文件（默认 <首个输入文件>.doc.yml）")
-    p.add_argument("--from", dest="from_format", default="gfm+fenced_divs")
+    p.add_argument("--from", dest="from_format", default=FROM_FORMAT,
+                   help=f"Markdown 方言（默认：{FROM_FORMAT}）")
     p.add_argument("--check", choices=("none", "sample", "all"), default="sample")
     p.add_argument("--keep-typ", action="store_true", help="不重新生成 .typ，直接编译")
     p.add_argument("--json", action="store_true")

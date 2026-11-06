@@ -66,6 +66,9 @@
 | `code.size` | length | `9pt` | 代码字号 |
 | `code.header` | bool | `true` | 代码块顶部语言栏 |
 | `math.numbering` | numbering | `none` | 公式编号格式，如 1 / (1) / none |
+| `cite.enabled` | bool | `auto` | 是否生成参考文献表；auto = 声明了 `bibliography` 才生成 |
+| `cite.style` | str | `auto` | CSL 样式：内置名（`ieee` / `apa` / `gb-7714-2015-numeric` …）或 `.csl` 路径；auto 按语言与 Kind 取默认 |
+| `cite.title` | str | `auto` | 参考文献标题；auto 按语言取「参考文献 / References」 |
 | `semantic.numbering` | numbering | `1` | 语义块编号格式，如 1 / (1)；none 表示只显示标签不编号 |
 | `novel.dropcap` | bool | `auto` | 章首首字下沉 |
 | `novel.chapter-prefix` | bool | `auto` | 自动生成「第 N 章」前缀 |

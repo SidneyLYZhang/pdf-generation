@@ -6,6 +6,7 @@ Skipped automatically when typst or pandoc is missing.
 from __future__ import annotations
 
 import contextlib
+import base64
 import io
 import shutil
 import sys
@@ -142,6 +143,275 @@ class BuildTests(unittest.TestCase):
         text = out.with_suffix(".typ").read_text(encoding="utf-8")
         self.assertNotIn('#dropcap("', text)
         self.assertIn("#strong[", text)
+
+
+    def test_image_outside_the_output_directory_still_builds(self):
+        images = self.tmp / "images"
+        images.mkdir()
+        (images / "fig.png").write_bytes(PNG_1PX)
+        out_dir = self.tmp / "out"
+        out_dir.mkdir()
+        md = self.tmp / "img.md"
+        md.write_text("---\ntitle: 测试\n---\n\n![渠道效率](images/fig.png)\n", encoding="utf-8")
+        code, _, err = run_cli(["build", str(md), "-o", str(out_dir / "img.pdf"),
+                                "--check", "none"])
+        self.assertEqual(code, 0, err)
+        typ = (out_dir / "img.typ").read_text(encoding="utf-8")
+        self.assertIn("pdfgen-root:", typ)
+        self.assertIn('image("/', typ)
+
+
+class DialectTests(unittest.TestCase):
+    """The pinned pandoc dialect is a contract: these guard it (ADR-0003)."""
+
+    REQUIRED = (
+        "+citations",
+        "+implicit_figures",
+        "+fenced_code_attributes",
+        "+bracketed_spans",
+        "+fenced_divs",
+        "+lists_without_preceding_blankline",
+    )
+    FORBIDDEN = ("-smart", "-raw_tex", "-latex_macros")
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-test-", dir=str(ROOT)))
+        (self.tmp / "refs.bib").write_text(BIB, encoding="utf-8")
+        (self.tmp / "a.png").write_bytes(PNG_1PX)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    @unittest.skipUnless(shutil.which("pandoc"), "需要 pandoc")
+    def test_constant_pins_the_decided_extensions(self):
+        for ext in self.REQUIRED:
+            self.assertIn(ext, bp.FROM_FORMAT)
+        for ext in self.FORBIDDEN:
+            self.assertIn(ext, bp.FROM_FORMAT)
+        self.assertTrue(bp.FROM_FORMAT.startswith("markdown"))
+
+    @unittest.skipUnless(HAVE_DEPS, "需要 typst 与 pandoc")
+    def test_dialect_parses_citations_attributes_and_lists(self):
+        md = self.tmp / "doc.md"
+        md.write_text(
+            "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n"
+            "这是一段足够长的中文正文，用来让语言检测判定为中文而不是英文。\n\n"
+            "![渠道效率](a.png){#fig:channels width=70%}\n\n"
+            "他说：\n- 一\n- 二\n\n正文 [@doe2020]。\n",
+            encoding="utf-8",
+        )
+        code, _, err = run_cli(["build", str(md), "-o", str(self.tmp / "doc.pdf"),
+                                "--check", "none"])
+        self.assertEqual(code, 0, err)
+        typ = (self.tmp / "doc.typ").read_text(encoding="utf-8")
+        self.assertIn("@doe2020", typ)
+        self.assertIn("#figure(", typ)
+        self.assertIn("width: 70.0%", typ)
+        self.assertIn("- 一", typ)
+
+    def test_bad_from_format_explains_itself(self):
+        code, _, err = run_cli(["build", str(ROOT / "examples/note.md"),
+                                "--from", "bogus", "--check", "none"])
+        self.assertEqual(code, 1)
+        self.assertIn("不认识的格式", err)
+
+
+BIB = """
+@book{doe2020,
+  author = {Doe, John},
+  title = {A Book Title},
+  year = {2020},
+  publisher = {Acme Press},
+}
+"""
+
+
+@unittest.skipUnless(HAVE_DEPS, "需要 typst 与 pandoc")
+class CitationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-test-", dir=str(ROOT)))
+        (self.tmp / "refs.bib").write_text(BIB, encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def build_doc(self, source: str, *extra: str):
+        md = self.tmp / "doc.md"
+        md.write_text(source, encoding="utf-8")
+        return run_cli(["build", str(md), "-o", str(self.tmp / "doc.pdf"),
+                        "--check", "none", *extra])
+
+    def test_bibliography_renders_chinese_citations(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n"
+            "这是一段足够长的中文正文，用来让语言检测判定为中文而不是英文。\n\n"
+            "正文 [@doe2020]。\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = (self.tmp / "doc.typ").read_text(encoding="utf-8")
+        self.assertIn('has-path: "yes"', typ)
+        self.assertIn('path: "refs.bib"', typ)
+        self.assertIn('style: "gb-7714-2015-numeric"', typ)
+        self.assertIn('title: "参考文献"', typ)
+        self.assertIn("@doe2020", typ)
+        self.assertGreater(bp.page_count(self.tmp / "doc.typ"), 0)
+
+    def test_english_document_defaults_to_ieee(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: Report\nbibliography: refs.bib\n---\n\n"
+            "This paragraph is long enough to be detected as English prose. [@doe2020]\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = (self.tmp / "doc.typ").read_text(encoding="utf-8")
+        self.assertIn('style: "ieee"', typ)
+        self.assertIn('title: "References"', typ)
+
+    def test_article_defaults_to_apa(self):
+        code, _, err = self.build_doc(
+            "---\nkind: article\ntitle: Report\nbibliography: refs.bib\n---\n\n"
+            "This paragraph is long enough to be detected as English prose. [@doe2020]\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = (self.tmp / "doc.typ").read_text(encoding="utf-8")
+        self.assertIn('style: "apa"', typ)
+
+    def test_locator_short_form_survives(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n"
+            "这是一段足够长的中文正文，用来让语言检测判定为中文而不是英文。\n\n"
+            "正文 [@doe2020, p. 33]。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("@doe2020[p. 33]", (self.tmp / "doc.typ").read_text(encoding="utf-8"))
+
+    def test_csl_file_style_is_resolved(self):
+        shutil.copy(ROOT / "test" / "fixtures" / "minimal.csl", self.tmp / "minimal.csl")
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n"
+            "这是一段足够长的中文正文，用来让语言检测判定为中文而不是英文。\n\n"
+            "正文 [@doe2020]。\n",
+            "--set", "cite.style=minimal.csl",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('style: "minimal.csl"', (self.tmp / "doc.typ").read_text(encoding="utf-8"))
+
+    def test_absolute_csl_path_is_rewritten_for_typst(self):
+        csl = self.tmp / "minimal.csl"
+        shutil.copy(ROOT / "test" / "fixtures" / "minimal.csl", csl)
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n"
+            "这是一段足够长的中文正文，用来让语言检测判定为中文而不是英文。\n\n"
+            "正文 [@doe2020]。\n",
+            "--set", f"cite.style={csl}",
+        )
+        self.assertEqual(code, 0, err)
+        typ = (self.tmp / "doc.typ").read_text(encoding="utf-8")
+        self.assertIn('style: "minimal.csl"', typ)
+        self.assertNotIn(str(csl), typ)
+
+    def test_missing_bibliography_file_fails(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\nbibliography: nope.bib\n---\n\n正文。\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("nope.bib", err)
+
+    def test_unknown_citation_key_fails(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n正文 [@smith2021]。\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("smith2021", err)
+
+
+PNG_1PX = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+@unittest.skipUnless(HAVE_DEPS, "需要 typst 与 pandoc")
+class CrossReferenceTests(unittest.TestCase):
+    """`@fig:` / `@tab:` / `@eq:` / `@sec:` are refs; every other @id is a citation."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-test-", dir=str(ROOT)))
+        (self.tmp / "a.png").write_bytes(PNG_1PX)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def build_doc(self, body: str, *extra: str):
+        md = self.tmp / "doc.md"
+        md.write_text(body, encoding="utf-8")
+        return run_cli(["build", str(md), "-o", str(self.tmp / "doc.pdf"),
+                        "--check", "none", *extra])
+
+    def typ(self) -> str:
+        return (self.tmp / "doc.typ").read_text(encoding="utf-8")
+
+    def test_figure_reference_becomes_typst_ref(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "![渠道效率](a.png){#fig:channels width=60%}\n\n见图 @fig:channels。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#ref(<fig:channels>)", self.typ())
+
+    def test_table_and_section_references(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "# 方法 {#sec:method}\n\n"
+            ": 槽位表 {#tab:slots}\n\n| a | b |\n|---|---|\n\n"
+            "见表 @tab:slots 与 @sec:method。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#ref(<tab:slots>)", self.typ())
+        self.assertIn("#ref(<sec:method>)", self.typ())
+
+    def test_equation_reference_needs_numbering(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n$$ y = mx + b \\label{eq:line} $$\n\n见 @eq:line。\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("math.numbering", err)
+
+    def test_equation_reference_works_with_numbering(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n$$ y = mx + b \\label{eq:line} $$\n\n见 @eq:line。\n",
+            "--set", "math.numbering=(1)",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#ref(<eq:line>)", self.typ())
+
+    def test_bracketed_reference_also_converts(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "![渠道效率](a.png){#fig:channels width=60%}\n\n见图 [@fig:channels]。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#ref(<fig:channels>)", self.typ())
+
+    def test_citation_is_not_a_reference(self):
+        (self.tmp / "refs.bib").write_text(
+            "@book{doe2020, author={Doe, John}, title={T}, year={2020}, publisher={P}}\n",
+            encoding="utf-8",
+        )
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n"
+            "这是一段足够长的中文正文，用来让语言检测判定为中文而不是英文。\n\n"
+            "正文 [@doe2020]。\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertNotIn("#ref(<doe2020>)", typ)
+        self.assertIn("@doe2020", typ)
+
+    def test_unknown_reference_names_the_id(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n见图 @fig:nope。\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("fig:nope", err)
 
 
 if __name__ == "__main__":

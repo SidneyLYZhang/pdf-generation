@@ -70,7 +70,7 @@ python scripts/build_pdf.py build report.md                        # 自动读�
 
 ## Markdown 写法
 
-- 方言是 GFM + fenced div：任务列表、脚注、管道表格、`::: {.theorem}` 语义块都能用。
+- 方言是钉死的 pandoc markdown：引文 `[@key]`、交叉引用 `@fig:`、围栏参数、图片题注、`::: {.theorem}` 语义块都能用。
 - 数学 `$x$` 内侧不能有空格；LaTeX 命令用 `\alpha`、`\frac` 这类合法写法。
 - 信函字段写在 frontmatter 的 `letter:` 下，字符串内 `\n` 表示换行。
 - 多文件：`build book.md ch01.md ch02.md`，第一个文件管元数据。

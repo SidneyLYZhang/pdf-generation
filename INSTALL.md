@@ -99,6 +99,18 @@ rm -rf ~/.dsh/skills/pdf-generation             # 卸载
 | 公司代理 / 证书 | 与本技能无关：Typst、pandoc、模板都不联网 |
 | macOS 提示 Typst 无法验证 | 系统设置 → 隐私与安全性 → 仍要打开 |
 
+### 附：棋谱包（已内联，无需安装）
+
+棋谱用的 Typst 包 `staunton` 2.0.0 已经内联在仓库的 `vendor/typst-packages/` 下，构建时通过 `--package-path` 解析，**不需要联网、也不需要往 Typst 全局缓存里装东西**。`doctor` 会编译一个空棋盘验证它能 import。
+
+升级它（只在想换版本时做）：
+
+1. 用新版本的发布包整体替换 `vendor/typst-packages/preview/staunton/<版本>/`；
+2. 改 `scripts/build_pdf.py` 里钉住的版本号（`STAUNTON_VERSION`）；
+3. 重跑 `python scripts/build_pdf.py doctor` 确认内联包可 import，再抽一页看看棋盘。
+
+注意许可：棋子 SVG 是 GPL-2.0-or-later，该目录单独挂 `LICENSE` 与 `NOTICE.md`，仓库其余部分仍是 MIT。
+
 ---
 
 ## 第二部分：给 Agent

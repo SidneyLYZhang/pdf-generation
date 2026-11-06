@@ -46,6 +46,48 @@ function Div(el)
   return pandoc.RawBlock("typst", "#" .. target .. head .. "[\n" .. typst_body(el.content) .. "\n]")
 end
 
+-- `@fig:x` / `@tab:x` / `@eq:x` / `@sec:x` are cross-references; every other
+-- `@id` is a citation.  pandoc parses both into Cite nodes, so the split lives
+-- here in the AST instead of being a regex over the document text.
+local REF_PREFIXES = { "fig:", "tab:", "eq:", "sec:" }
+
+local function is_reference(id)
+  for _, prefix in ipairs(REF_PREFIXES) do
+    if id:sub(1, #prefix) == prefix then
+      return true
+    end
+  end
+  return false
+end
+
+function Cite(el)
+  if #el.citations == 0 then
+    return nil
+  end
+  for _, citation in ipairs(el.citations) do
+    if not is_reference(citation.id) then
+      return nil
+    end
+  end
+
+  local out = {}
+  for index, citation in ipairs(el.citations) do
+    if index > 1 then
+      out[#out + 1] = pandoc.Str(",")
+      out[#out + 1] = pandoc.Space()
+    end
+    -- Typst labels only allow word characters, `:`, `.` and `-`.
+    local target = citation.id:gsub("[^%w_:%.%-]", "")
+    out[#out + 1] = pandoc.RawInline("typst", "#ref(<" .. target .. ">)")
+    local suffix = pandoc.utils.stringify(citation.suffix)
+    if suffix ~= "" then
+      out[#out + 1] = pandoc.Space()
+      out[#out + 1] = pandoc.Str(suffix)
+    end
+  end
+  return out
+end
+
 -- The novel kind drops the first character of every chapter opening; the
 -- template turns this wrapper into a drop cap and ignores it otherwise.
 -- Only plain-text paragraphs qualify: stringifying would silently drop bold,

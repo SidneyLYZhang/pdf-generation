@@ -196,6 +196,8 @@
 
   body
 
+  bibliography-section(meta, st)
+
   if st.kind == "letter" {
     letter-tail(meta, st)
   }

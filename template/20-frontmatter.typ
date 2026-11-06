@@ -145,6 +145,19 @@
   outline(title: none, depth: st.toc.depth, indent: 1.1em)
 }
 
+// The bibliography is a normal Typst bibliography: Typst owns the CSL rendering,
+// so `.bib`, CSL-JSON and Hayagriva files all work and `@key` stays a live link.
+#let bibliography-section(meta, st) = {
+  if not st.cite.enabled { return }
+  let b = meta.bib
+  if not present(b.has-path) { return }
+  bibliography(
+    b.path,
+    style: st.cite.style,
+    title: [#st.cite.title],
+  )
+}
+
 #let letter-head(meta, st) = {
   let l = meta.letter
   set text(size: st.text.size)

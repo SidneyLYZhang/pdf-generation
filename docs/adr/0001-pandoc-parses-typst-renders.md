@@ -1,5 +1,7 @@
 # pandoc 解析 Markdown，Typst 负责排版
 
+**Status**: 部分被 ADR-0003 修订——「pandoc 解析、Typst 排版」不变，但 Markdown 方言由 GFM 改为 pandoc markdown。
+
 原技能用 Pandoc + XeLaTeX，依赖数 GB 的 TeX 发行版，且版式能力锁在 Eisvogel/LaTeX 里，无法干净地暴露"排版旋钮"。改为：pandoc 只做 `-f gfm -t typst` 的语法解析，版式全部由 skill 自带的 Typst 模板承担，Typst 直接出 PDF。仍然保留 pandoc，是因为 LaTeX 数学转 Typst 数学、表格、脚注与嵌套列表这些解析工作，自研脚本的稳定性远不如它；`-f gfm` 还顺带修掉了旧 `fix_markdown.py` 要处理的"冒号后列表被吞成一段"问题。
 
 ## Considered Options

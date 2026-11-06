@@ -131,6 +131,36 @@ class ResolveStyleTests(unittest.TestCase):
         self.assertEqual(en["text"]["font"], ["Libertinus Serif"])
 
 
+class CitationStyleTests(unittest.TestCase):
+    def test_style_defaults_follow_language_and_kind(self):
+        self.assertEqual(bp.resolve_style("report", {}, [], "zh")["cite"]["style"],
+                         "gb-7714-2015-numeric")
+        self.assertEqual(bp.resolve_style("report", {}, [], "en")["cite"]["style"], "ieee")
+        self.assertEqual(bp.resolve_style("article", {}, [], "en")["cite"]["style"], "apa")
+        self.assertEqual(bp.resolve_style("article", {}, [], "zh")["cite"]["style"], "apa")
+
+    def test_title_defaults_follow_language(self):
+        self.assertEqual(bp.resolve_style("report", {}, [], "zh")["cite"]["title"], "参考文献")
+        self.assertEqual(bp.resolve_style("report", {}, [], "en")["cite"]["title"], "References")
+
+    def test_enabled_follows_bibliography_presence(self):
+        self.assertFalse(bp.resolve_style("report", {}, [], "zh")["cite"]["enabled"])
+        self.assertTrue(
+            bp.resolve_style("report", {}, [], "zh", has_bibliography=True)["cite"]["enabled"]
+        )
+        self.assertTrue(bp.resolve_style("report", {}, ["cite.enabled=true"], "zh")["cite"]["enabled"])
+
+    def test_style_can_be_overridden(self):
+        style = bp.resolve_style("report", {}, ["cite.style=apa", "cite.title=文献"], "zh")
+        self.assertEqual(style["cite"]["style"], "apa")
+        self.assertEqual(style["cite"]["title"], "文献")
+
+    def test_explicit_text_lang_moves_the_citation_defaults(self):
+        style = bp.resolve_style("report", {}, ["text.lang=en"], "zh")
+        self.assertEqual(style["cite"]["style"], "ieee")
+        self.assertEqual(style["cite"]["title"], "References")
+
+
 class EmissionTests(unittest.TestCase):
     def test_lengths_and_colours_are_literals(self):
         style = bp.resolve_style("report", {}, ["page.margin=2cm"], "zh")
@@ -162,24 +192,6 @@ class EmissionTests(unittest.TestCase):
         text = bp.to_yaml(style)
         self.assertIn('accent: "#ABCDEF"', text)
         self.assertEqual(bp.parse_simple_yaml(text)["color"]["accent"], "#ABCDEF")
-
-    def test_image_paths_become_absolute(self):
-        import tempfile
-
-        tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-test-", dir=str(ROOT)))
-        try:
-            (tmp / "fig.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-            body = '#figure(image("fig.png"), caption: [x])'
-            out = bp.absolutize_images(body, tmp)
-            self.assertIn((tmp / "fig.png").resolve().as_posix(), out)
-        finally:
-            import shutil
-
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_missing_image_left_untouched(self):
-        body = 'image("nope.png")'
-        self.assertEqual(bp.absolutize_images(body, ROOT), body)
 
 
 class SamplingTests(unittest.TestCase):
