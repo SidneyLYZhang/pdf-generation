@@ -218,6 +218,16 @@ $$ y = mx + b \label{eq:line} $$
 - 指向不存在的 id 会构建失败并打印那个 id。
 - 公式必须先有编号才能被指向：`math.numbering` 为 `none` 时会直接报错，用 `--set math.numbering=(1)` 打开。
 
+## 棋谱
+
+`fen` / `chess` / `pgn` / `notation` 四种围栏交给内联的 staunton 排版，详见 [chess.md](chess.md)。最常用的一种：
+
+````markdown
+```fen {#fig:italian caption="意大利开局"}
+r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3
+```
+````
+
 ## frontmatter 元数据
 
 | 键 | 用途 |

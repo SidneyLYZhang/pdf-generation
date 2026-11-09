@@ -38,11 +38,14 @@ LUA_FILTER = SKILL_ROOT / "filters" / "semantic.lua"
 FEATURE_FILTER = SKILL_ROOT / "filters" / "features.lua"
 # No-op unless the build passed a `pdfgen-diagrams` metadata file.
 DIAGRAM_FILTER = SKILL_ROOT / "filters" / "diagrams.lua"
+# No-op unless the build passed `pdfgen-chess`.
+CHESS_FILTER = SKILL_ROOT / "filters" / "chess.lua"
 # Vendored Typst Universe packages (ADR-0005).  Typst resolves `@preview/...`
 # imports here when `--package-path` points at it, so no network is needed.
 VENDOR_PACKAGES = SKILL_ROOT / "vendor" / "typst-packages"
 # Pinned by ADR-0005; change here and in the vendored directory together.
 STAUNTON_VERSION = "2.0.0"
+CHESS_TEMPLATE = "38-chess.typ"
 
 KINDS = ("report", "article", "letter", "note", "book", "textbook", "novel")
 
@@ -365,6 +368,83 @@ def inspect_sidenotes(text: str, include_footnotes: bool = False) -> tuple[bool,
     overlong = [length for length in lengths if length > LONG_NOTE_CHARS]
     return bool(inline or blocks), overlong, crowded
 
+# Chess: `fen` / `chess` / `pgn` / `notation` fences become staunton calls.  The
+# package is vendored, so the template imports it only when a document uses one.
+CHESS_LANGS = {"fen", "chess", "pgn", "notation"}
+CHESS_DIAGRAM_ATTRS = (
+    "caption", "size", "flip", "labels", "check", "last-move", "theme",
+    "at", "arrows", "highlight", "id",
+)
+CHESS_NOTATION_ATTRS = ("figurine", "variations", "nags", "comments", "move-numbers")
+CHESS_BOOL_FLAGS = (
+    "flip", "labels", "check",
+    "figurine", "variations", "nags", "comments", "move-numbers",
+)
+# staunton's `last-move` is a style, not a switch: none / "arrow" / "squares".
+CHESS_LAST_MOVE = ("none", "arrow", "squares")
+# The built-in color themes staunton accepts by name.
+CHESS_THEMES = (
+    "staunton-default", "dutch-gray", "scid", "wikipedia", "xboard",
+    "coral", "dusk", "emerald", "marine", "sandcastle", "wheat",
+)
+SQUARE_LIST_RE = re.compile(r"^[a-h][1-8](,[a-h][1-8])*$")
+ARROW_LIST_RE = re.compile(r"^[a-h][1-8][a-h][1-8](,[a-h][1-8][a-h][1-8])*$")
+
+
+def prepare_chess(inputs: list[Path]) -> bool:
+    """Validate chess fences; return whether the document needs the package."""
+    needed = False
+    for path in inputs:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for start, _, _, info, _ in iter_fences(text):
+            lang, attrs = parse_fence_info(info)
+            if lang not in CHESS_LANGS:
+                continue
+            needed = True
+            valid = CHESS_NOTATION_ATTRS if lang == "notation" else CHESS_DIAGRAM_ATTRS
+            unknown = sorted(set(attrs) - set(valid))
+            if unknown:
+                raise SpecError(
+                    f"{path}:{start} 的 {lang} 围栏有不认识的选项：{', '.join(unknown)}；"
+                    f"可用：{', '.join(valid)}"
+                )
+            for flag in CHESS_BOOL_FLAGS:
+                value = attrs.get(flag)
+                if value is not None and value.lower() not in ("true", "false", "yes", "no"):
+                    raise SpecError(
+                        f"{path}:{start} 的 {flag} 需要 true / false，收到 {value!r}"
+                    )
+            last_move = attrs.get("last-move")
+            if last_move is not None and last_move.lower() not in CHESS_LAST_MOVE:
+                raise SpecError(
+                    f"{path}:{start} 的 last-move 只能是 "
+                    f"{' / '.join(CHESS_LAST_MOVE)}，收到 {last_move!r}"
+                )
+            theme = attrs.get("theme")
+            if theme is not None and theme.lower() not in CHESS_THEMES:
+                raise SpecError(
+                    f"{path}:{start} 的 theme 只能是 {' / '.join(CHESS_THEMES)}，"
+                    f"收到 {theme!r}"
+                )
+            size = attrs.get("size")
+            if size and not LENGTH_ATTR_RE.match(size):
+                raise SpecError(f"{path}:{start} 的 size {size!r} 不是长度（如 6cm / 60%）")
+            arrows = attrs.get("arrows")
+            if arrows and not ARROW_LIST_RE.match(arrows):
+                raise SpecError(
+                    f"{path}:{start} 的 arrows 要写成 f3e5,f1c4（起点终点各一个格）"
+                )
+            highlight = attrs.get("highlight")
+            if highlight and not SQUARE_LIST_RE.match(highlight):
+                raise SpecError(f"{path}:{start} 的 highlight 要写成逗号分隔的格子，如 e5,d4")
+            label = attrs.get("id")
+            if label and not LABEL_RE.match(label):
+                raise SpecError(f"{path}:{start} 的图标签 {label!r} 含非法字符")
+            if attrs.get("at") and lang != "pgn":
+                raise SpecError(f"{path}:{start} 的 at 只能用在 pgn 围栏上")
+    return needed
+
+
 # Diagrams: a `mermaid` or `dot` fence is rendered to SVG at build time and
 # turned into a normal figure, so the float knobs and @fig: references apply.
 # The rendered paths reach pandoc as a metadata file; filters/diagrams.lua looks
@@ -424,7 +504,7 @@ def parse_fence_info(info: str) -> tuple[str, dict[str, str]]:
     return lang.strip().lower(), attrs
 
 
-def find_diagram_blocks(text: str) -> list[dict]:
+def find_diagram_blocks(text: str, where: str = "") -> list[dict]:
     """Diagram fences in `text`, with the line their fence starts on."""
     blocks: list[dict] = []
     for start, _, _, info, body in iter_fences(text):
@@ -433,8 +513,9 @@ def find_diagram_blocks(text: str) -> list[dict]:
             continue
         unknown = sorted(set(attrs) - set(DIAGRAM_ATTRS))
         if unknown:
+            location = f"{where}:{start}" if where else f"第 {start} 行"
             raise SpecError(
-                f"第 {start} 行的 {lang} 图有不认识的选项：{', '.join(unknown)}；"
+                f"{location}的 {lang} 图有不认识的选项：{', '.join(unknown)}；"
                 f"可用：{', '.join(DIAGRAM_ATTRS)}"
             )
         blocks.append({"lang": lang, "attrs": attrs, "text": "\n".join(body), "line": start})
@@ -497,7 +578,7 @@ def prepare_diagrams(inputs: list[Path], base: Path) -> tuple[Path | None, list[
     index = 0
     for path in inputs:
         text = path.read_text(encoding="utf-8", errors="replace")
-        for block in find_diagram_blocks(text):
+        for block in find_diagram_blocks(text, str(path)):
             index += 1
             attrs = block["attrs"]
             command = renderer_command(block["lang"])
@@ -1032,7 +1113,7 @@ def pandoc_meta(path: Path, from_fmt: str) -> str:
 
 def body_typst(inputs: list[Path], from_fmt: str, kind: str, *,
                note_style: str = "footnote", code_lines: bool = False,
-               diagram_metadata: Path | None = None) -> str:
+               diagram_metadata: Path | None = None, chess_lang: str = "") -> str:
     need("pandoc", "安装：winget install JohnMacFarlane.Pandoc")
     cmd = [
         "pandoc", "-f", from_fmt, "-t", "typst",
@@ -1040,9 +1121,11 @@ def body_typst(inputs: list[Path], from_fmt: str, kind: str, *,
         f"--metadata=pdfgen-note-style:{note_style}",
         f"--metadata=pdfgen-code-lines:{'yes' if code_lines else 'no'}",
     ]
+    if chess_lang:
+        cmd.append(f"--metadata=pdfgen-chess:{chess_lang}")
     if diagram_metadata is not None:
         cmd.append(f"--metadata-file={diagram_metadata}")
-    for lua_filter in (DIAGRAM_FILTER, FEATURE_FILTER, LUA_FILTER):
+    for lua_filter in (DIAGRAM_FILTER, CHESS_FILTER, FEATURE_FILTER, LUA_FILTER):
         if not lua_filter.exists():
             raise SpecError(f"缺少 Lua filter {lua_filter}（技能目录不完整，重新安装）")
         cmd += [f"--lua-filter={lua_filter}"]
@@ -1140,13 +1223,19 @@ def rewrite_images(body: str, base: Path, typ_dir: Path, root: Path) -> str:
 # --------------------------------------------------------------------------- #
 # Composition
 # --------------------------------------------------------------------------- #
-def template_source() -> str:
+def template_source(include_chess: bool = False) -> str:
     parts = []
     for path in sorted(TEMPLATE_DIR.glob("*.typ")):
         if path.name == "meta.typ":
             continue
+        if path.name == CHESS_TEMPLATE and not include_chess:
+            # The staunton import must not burden documents that lack chess.
+            continue
         parts.append(f"// ---- {path.name} " + "-" * max(0, 60 - len(path.name)))
-        parts.append(path.read_text(encoding="utf-8").rstrip())
+        text = path.read_text(encoding="utf-8").rstrip()
+        if path.name == CHESS_TEMPLATE:
+            text = text.replace("__STAUNTON_VERSION__", STAUNTON_VERSION)
+        parts.append(text)
     return "\n\n".join(parts)
 
 
@@ -1171,7 +1260,7 @@ def root_from_typ(typ: Path) -> Path | None:
 
 
 def compose(typ_path: Path, *, meta_ty: str, letter_ty: str, bib_ty: str, style: dict,
-            body: str, root: Path | None = None) -> None:
+            body: str, root: Path | None = None, include_chess: bool = False) -> None:
     header = (
         "// Generated by the pdf-generation skill. Rebuilding overwrites this\n"
         "// file; to hand-edit it, build once, edit, then rerun with --keep-typ.\n"
@@ -1182,10 +1271,15 @@ def compose(typ_path: Path, *, meta_ty: str, letter_ty: str, bib_ty: str, style:
         # Only recorded when assets live outside the .typ's own directory: that
         # is when paths are root-relative and `typst compile` needs --root.
         header += f"// pdfgen-root: {root.as_posix()}\n"
+    if include_chess:
+        header += (
+            "// Chess needs the vendored package, so a manual build is:\n"
+            f"//   typst compile --package-path \"{VENDOR_PACKAGES}\" <this file>\n"
+        )
     style_lit = typst_dict(style, KNOBS)
     text = "\n".join([
         header,
-        template_source(),
+        template_source(include_chess),
         "",
         meta_ty.strip(),
         "",
@@ -1390,10 +1484,17 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
         diagram_filter, diagram_warnings = prepare_diagrams(inputs, first.parent)
+        needs_chess = prepare_chess(inputs)
+        if needs_chess and not VENDOR_PACKAGES.exists():
+            raise SpecError(
+                "文档里有棋谱围栏，但 vendor/typst-packages 不存在；"
+                "按 INSTALL.md「棋谱包」一节恢复内联包"
+            )
         raw_body = body_typst(inputs, from_fmt, str(chosen),
                               note_style=str(style["note"]["style"]),
                               code_lines=bool(style["code"]["line-numbers"]),
-                              diagram_metadata=diagram_filter)
+                              diagram_metadata=diagram_filter,
+                              chess_lang=str(style["text"]["lang"]) if needs_chess else "")
         if "#ref(<eq:" in raw_body and style["math"]["numbering"] == "none":
             raise SpecError(
                 "正文引用了公式（@eq: / \\eqref / \\ref），但公式没有编号，Typst 无法生成引用。\n"
@@ -1411,7 +1512,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
             asset_path(bib_path, typ_path.parent, root) if bib_path else ""
         )
         compose(typ_path, meta_ty=meta, letter_ty=letter_snippet(fm), bib_ty=bib_ty,
-                style=style, body=body, root=root)
+                style=style, body=body, root=root, include_chess=needs_chess)
 
     proc = run(["typst", "compile", *typst_args(root), str(typ_path), str(out_pdf)], check=False)
     warnings = parse_warnings(proc.stderr)
@@ -1501,6 +1602,10 @@ def cmd_detect(args) -> int:
             "fenced_div": bool(re.search(r"^:::", joined, re.M)),
             "footnote": bool(re.search(r"\[\^[^\]]+\]", joined)),
             "task_list": bool(re.search(r"^\s*- \[[ x]\]", joined, re.M)),
+            "chess": any(parse_fence_info(info)[0] in CHESS_LANGS
+                         for _, _, _, info, _ in iter_fences(joined)),
+            "diagram": any(parse_fence_info(info)[0] in DIAGRAM_RENDERERS
+                           for _, _, _, info, _ in iter_fences(joined)),
         },
     }
     print(json.dumps(info, ensure_ascii=False, indent=2))

@@ -171,6 +171,8 @@ python scripts/build_pdf.py build examples/report.md
 ├── template/*.typ    ← 构建时按文件名顺序内联
 ├── filters/features.lua
 ├── filters/semantic.lua
+├── filters/diagrams.lua
+├── filters/chess.lua
 ├── references/*.md
 └── examples/*.md
 ```

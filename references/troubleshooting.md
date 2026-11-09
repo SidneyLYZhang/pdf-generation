@@ -129,7 +129,7 @@ PNG 落在 `<pdf 所在目录>/<stem>/`。
 
 ### 想直接改 Typst 源码
 
-`<stem>.typ` 是自包含的（模板已内联），可以直接 `typst compile <stem>.typ`。但每次 `build` 会覆盖它；要迭代手改版本：
+`<stem>.typ` 是自包含的（模板已内联），可以直接 `typst compile <stem>.typ`。用了棋谱的文档例外：它 import 了内联的 staunton，要加 `--package-path <技能目录>/vendor/typst-packages`——生成的 `.typ` 头部注释里写了完整命令。每次 `build` 会覆盖它；要迭代手改版本：
 
 ```bash
 python scripts/build_pdf.py build doc.md          # 先生成 doc.typ

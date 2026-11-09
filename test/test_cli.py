@@ -861,6 +861,159 @@ class DiagramTests(unittest.TestCase):
 
 
 
+FEN = "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3"
+PGN = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 *"
+
+
+@unittest.skipUnless(HAVE_DEPS and bp.VENDOR_PACKAGES.exists(), "需要 typst、pandoc 与内联包")
+class ChessTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-test-", dir=str(ROOT)))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def build_doc(self, body: str, *extra: str):
+        md = self.tmp / "doc.md"
+        md.write_text(body, encoding="utf-8")
+        return run_cli(["build", str(md), "-o", str(self.tmp / "doc.pdf"),
+                        "--check", "none", *extra])
+
+    def typ(self) -> str:
+        return (self.tmp / "doc.typ").read_text(encoding="utf-8")
+
+    def test_fen_fence_becomes_a_captioned_figure(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f'```fen {{#fig:pos caption="开局"}}\n{FEN}\n```\n\n见 @fig:pos。\n'
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("#st-diagram(", typ)
+        self.assertIn('caption: [#text("开局")]', typ)
+        self.assertIn("<fig:pos>", typ)
+        self.assertIn("#ref(<fig:pos>)", typ)
+
+    def test_chess_is_an_alias_for_fen(self):
+        code, _, err = self.build_doc(
+            f"---\ntitle: 测试\n---\n\n```chess\n{FEN}\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#st-diagram(", self.typ())
+
+    def test_pgn_with_at_needs_a_parsed_game(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f'```pgn {{at="3w" caption="三步之后"}}\n{PGN}\n```\n'
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("st-game(", typ)
+        self.assertIn('at: "3w"', typ)
+
+    def test_diagram_options_reach_the_call(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f'```fen {{flip=true labels=false size=4cm arrows="f3e5" highlight="e5"}}\n{FEN}\n```\n'
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("flip: true", typ)
+        self.assertIn("labels: false", typ)
+        self.assertIn("size: 4cm", typ)
+        self.assertIn('arrows: (("f3", "e5"),)', typ)
+        self.assertIn('highlight: ("e5",)', typ)
+
+    def test_check_and_last_move(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f'```fen {{check=true last-move="arrow"}}\n{FEN}\n```\n'
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("check: true", typ)
+        self.assertIn('last-move: "arrow"', typ)
+
+    def test_boolean_values_are_case_insensitive(self):
+        code, _, err = self.build_doc(
+            f"---\ntitle: 测试\n---\n\n```fen {{flip=TRUE}}\n{FEN}\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("flip: true", self.typ())
+
+    def test_bad_last_move_fails(self):
+        code, _, err = self.build_doc(
+            f'---\ntitle: 测试\n---\n\n```fen {{last-move="braces"}}\n{FEN}\n```\n'
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("last-move", err)
+
+    def test_notation_fence_and_flags(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f"```notation {{figurine=true variations=true}}\n{PGN}\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("#st-notation(", typ)
+        self.assertIn("st-game(", typ)
+        self.assertIn("figurine: true", typ)
+        self.assertIn("variations: true", typ)
+
+    def test_theme_option_maps_to_a_color_theme(self):
+        code, _, err = self.build_doc(
+            f'---\ntitle: 测试\n---\n\n```fen {{theme="wikipedia"}}\n{FEN}\n```\n'
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('color-theme: st-color-theme(base: "wikipedia")', self.typ())
+
+    def test_unknown_theme_fails(self):
+        code, _, err = self.build_doc(
+            f'---\ntitle: 测试\n---\n\n```fen {{theme="brown"}}\n{FEN}\n```\n'
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("theme", err)
+
+    def test_chinese_document_uses_the_chinese_supplement(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "这一段正文写得足够长，用来让语言检测判定为中文，而不是英文。\n\n"
+            f"```fen\n{FEN}\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("supplement: [棋图]", self.typ())
+
+    def test_unknown_option_fails_and_lists_choices(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f"```fen {{orientaton=left}}\n{FEN}\n```\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("orientaton", err)
+        self.assertIn("caption", err)
+
+    def test_at_is_rejected_on_fen(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f'```fen {{at="3w"}}\n{FEN}\n```\n'
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("只能用在 pgn", err)
+
+    def test_import_only_when_chess_is_used(self):
+        code, _, err = self.build_doc("---\ntitle: 测试\n---\n\n正文。\n")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("staunton", self.typ())
+        code, _, err = self.build_doc(
+            f"---\ntitle: 测试\n---\n\n```fen\n{FEN}\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn('@preview/staunton:', typ)
+        # The header tells a human how to rebuild the .typ by hand.
+        self.assertIn("--package-path", typ.split("#show: doc.with")[0])
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -73,7 +73,7 @@ python scripts/build_pdf.py build <输入文件...> [-o out.pdf] [--kind K] [--d
 python scripts/build_pdf.py build book.md ch01.md ch02.md
 ```
 
-产物三件：`<stem>.pdf`（交付）、`<stem>.typ`（自包含，可直接 `typst compile`）、`<stem>/` 下的抽页 PNG。
+产物三件：`<stem>.pdf`（交付）、`<stem>.typ`（自包含，可直接 `typst compile`；用了棋谱的文档要加 `--package-path`，文件头注释里给了现成命令）、`<stem>/` 下的抽页 PNG。
 
 **完成判据**：命令退出码为 0，且输出里有 `PDF ... (N 页)`。
 
@@ -122,5 +122,6 @@ python scripts/build_pdf.py build doc.md --set heading.size-1=18pt --set color.p
 - [references/kinds.md](references/kinds.md) — 七种 Kind 的版式细节、frontmatter 示例、默认值
 - [references/style-knobs.md](references/style-knobs.md) — 全部旋钮、取值格式、各 Kind 覆盖表
 - [references/authoring.md](references/authoring.md) — Markdown 方言：数学、语义块、信函字段、多文件、图片
+- [references/chess.md](references/chess.md) — 棋谱：fen / pgn / notation 围栏与选项
 - [references/troubleshooting.md](references/troubleshooting.md) — 报错与版式问题的处理
 - [INSTALL.md](INSTALL.md) — 安装（分「用户」与「Agent」两部分）

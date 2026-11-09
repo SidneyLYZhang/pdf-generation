@@ -57,7 +57,7 @@ _Avoid_: 旁注、marginnote、margin note
 _Avoid_: 流程图、chart
 
 **Chess diagram**:
-由 `fen` / `pgn` 围栏经 staunton 排出的棋盘图，自带题注与编号。
+由 `fen` / `pgn` 围栏经 staunton 排出的棋盘图，自带题注与编号；`notation` 围栏排出的是走法记谱，不是图。
 _Avoid_: 棋谱图、board
 
 **Style spec**:

@@ -5,7 +5,7 @@
 - **七种版式**：报告、文章、信函、笔记、书、教材、小说
 - **可调排版**：五十多个旋钮，纸张、字体、行距、页眉、配色逐项可改
 - **先问后做**：内置 Clarify 阶段，只问会改变成品的选择，并给推荐值
-- **自包含产物**：生成的 `.typ` 内联整个模板，可直接 `typst compile` 复现
+- **自包含产物**：生成的 `.typ` 内联整个模板，可直接 `typst compile` 复现（用了棋谱的文档例外：它要 `--package-path` 指向内联的 staunton）
 
 ## 安装
 
@@ -95,9 +95,12 @@ pdf-generation/
 │   └── meta.typ             # pandoc 元数据模板
 ├── filters/features.lua     # 元数据驱动的重写：笔记模式、代码行号（先跑）
 ├── filters/semantic.lua     # ::: div → 语义块；@ 引用；章首首段标记
+├── filters/diagrams.lua     # 图表围栏 → figure（元数据驱动）
+├── filters/chess.lua        # 棋谱围栏 → staunton 调用
+├── vendor/typst-packages/   # 内联的 staunton 2.0.0（GPL 子目录，见 NOTICE）
 ├── scripts/build_pdf.py     # detect / build / style / check / doctor
 ├── test/                    # 无第三方依赖的测试
-├── references/              # kinds / style-knobs / authoring / troubleshooting
+├── references/              # kinds / style-knobs / authoring / chess / troubleshooting
 └── examples/                # 七种 Kind 各一份样张
 ```
 
