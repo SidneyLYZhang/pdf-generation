@@ -589,6 +589,22 @@ class CodeLineNumberTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("和尾随空格", self.typ())
 
+    def test_marker_class_never_becomes_the_language_tag(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n```{.line-numbers}\na = 1\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("#numbered-code[", typ)
+        self.assertNotIn("line-numbers", typ.split("#show: doc.with")[-1])
+
+    def test_opt_out_class_is_stripped_in_a_plain_build(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n```{.no-line-numbers}\na = 1\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("no-line-numbers", self.typ().split("#show: doc.with")[-1])
+
     def test_code_inside_a_semantic_block_is_numbered(self):
         code, _, err = self.build_doc(
             "---\ntitle: 测试\n---\n\n::: {.notice}\n```python\na = 1\n```\n:::\n",

@@ -857,8 +857,9 @@ def body_typst(inputs: list[Path], from_fmt: str, kind: str, *,
         f"--metadata=pdfgen-code-lines:{'yes' if code_lines else 'no'}",
     ]
     for lua_filter in (FEATURE_FILTER, LUA_FILTER):
-        if lua_filter.exists():
-            cmd += [f"--lua-filter={lua_filter}"]
+        if not lua_filter.exists():
+            raise SpecError(f"缺少 Lua filter {lua_filter}（技能目录不完整，重新安装）")
+        cmd += [f"--lua-filter={lua_filter}"]
     cmd += [str(p) for p in inputs]
     return pandoc_stdout(cmd, from_fmt)
 

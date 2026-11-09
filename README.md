@@ -93,7 +93,8 @@ pdf-generation/
 │   ├── 40-kinds.typ         # 小说章首、首字下沉
 │   ├── 90-doc.typ           # 主装配
 │   └── meta.typ             # pandoc 元数据模板
-├── filters/semantic.lua     # ::: div → 语义块；章首首段标记
+├── filters/features.lua     # 元数据驱动的重写：笔记模式、代码行号（先跑）
+├── filters/semantic.lua     # ::: div → 语义块；@ 引用；章首首段标记
 ├── scripts/build_pdf.py     # detect / build / style / check / doctor
 ├── test/                    # 无第三方依赖的测试
 ├── references/              # kinds / style-knobs / authoring / troubleshooting
@@ -117,3 +118,4 @@ python -m unittest discover -s test -v
 ## License
 
 MIT，见 [LICENSE](LICENSE)。
+

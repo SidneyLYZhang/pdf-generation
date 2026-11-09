@@ -158,6 +158,7 @@ python scripts/build_pdf.py build examples/report.md
 ├── SKILL.md          ← 必需，必须在根部，name 与目录名一致
 ├── scripts/build_pdf.py
 ├── template/*.typ    ← 构建时按文件名顺序内联
+├── filters/features.lua
 ├── filters/semantic.lua
 ├── references/*.md
 └── examples/*.md
@@ -184,3 +185,4 @@ python -m unittest discover -s test -v
 ```
 
 它覆盖 YAML 子集解析、样式优先级、CLI 参数校验、抽页规则，以及七种 Kind 的端到端构建（缺 typst/pandoc 时自动跳过）。
+
