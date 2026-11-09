@@ -65,6 +65,7 @@
 | `code.theme` | codetheme | `default` | 代码高亮：default / none |
 | `code.size` | length | `9pt` | 代码字号 |
 | `code.header` | bool | `true` | 代码块顶部语言栏 |
+| `code.line-numbers` | bool | `false` | 代码行号；单块用 `{.line-numbers}` / `{.no-line-numbers}` 覆盖 |
 | `math.numbering` | numbering | `none` | 公式编号格式，如 1 / (1) / none |
 | `note.style` | notestyle | `footnote` | 注释位置：footnote（页脚）/ margin（页边） |
 | `note.width` | length | `4.2cm` | 边注栏宽度 |
@@ -93,12 +94,12 @@
 | `heading.size-1` | `22pt` | `19pt` | `14pt` | `17pt` | `22pt` | `22pt` | `20pt` |
 | `heading.size-2` | — | — | — | — | `15pt` | `15pt` | — |
 | `heading.size-3` | — | — | — | — | `12pt` | `12pt` | — |
+| `note.style` | — | — | — | — | — | `margin` | — |
 | `novel.chapter-prefix` | — | — | — | — | `False` | `False` | `True` |
 | `novel.dropcap` | — | — | — | — | `False` | `False` | `True` |
 | `page.margin` | — | — | `3cm` | — | `2cm` | `2.4cm` | `2.2cm` |
 | `page.paper` | — | — | — | — | `6x9` | `a4` | `a5` |
 | `semantic.numbering` | `none` | — | — | — | — | `1` | — |
-| `note.style` | — | — | — | — | — | `margin` | — |
 | `text.first-line-indent` | `0em` | `0em` | `0em` | `0em` | `2em` | `2em` | `2em` |
 | `text.leading` | — | — | — | `0.6em` | — | — | — |
 | `text.paragraph-spacing` | `1em` | `0.9em` | `1.2em` | `0.5em` | `0.45em` | `0.35em` | `0.45em` |

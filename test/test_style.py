@@ -187,6 +187,14 @@ class SidenoteStyleTests(unittest.TestCase):
         self.assertEqual(style["note"]["size"], "7pt")
 
 
+class CodeStyleTests(unittest.TestCase):
+    def test_line_numbers_default_off_and_can_be_turned_on(self):
+        self.assertFalse(bp.resolve_style("report", {}, [], "zh")["code"]["line-numbers"])
+        self.assertTrue(
+            bp.resolve_style("report", {}, ["code.line-numbers=true"], "zh")["code"]["line-numbers"]
+        )
+
+
 class SidenoteScanTests(unittest.TestCase):
     def test_no_notes(self):
         self.assertEqual(bp.inspect_sidenotes("普通正文。"), (False, [], 0))

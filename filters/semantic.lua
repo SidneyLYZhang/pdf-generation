@@ -1,8 +1,8 @@
--- Line 1-3: the AST-level syntax the filter owns.
+-- Line 1-5: the AST-level syntax this filter owns.  Metadata-driven rewrites
+-- (margin notes, code line numbers) live in features.lua, which runs first.
 --   fenced divs -> semantic blocks / page breaks / margin notes
 --   spans       -> inline margin notes
 --   Cite        -> cross-references (fig:/tab:/eq:/sec:) vs citations
---   Note        -> margin notes in margin mode
 --   Pandoc      -> kind-specific rewrites (novel drop caps)
 --
 -- Map fenced Divs to the semantic blocks the template provides, and mark the
@@ -126,20 +126,7 @@ local function plain_paragraph(para)
   return true
 end
 
--- In margin mode every footnote becomes a margin note.  The conversion has to
--- happen here: a `show footnote` rule in the template would replace the inline
--- marker but Typst would still typeset the entry in the page footer.
-local function note_to_sidenote(note)
-  return pandoc.RawInline("typst", "#sidenote[" .. typst_body(note.content) .. "]")
-end
-
 function Pandoc(doc)
-  local note_style = doc.meta["pdfgen-note-style"]
-  note_style = note_style and pandoc.utils.stringify(note_style) or "footnote"
-  if note_style == "margin" then
-    doc = doc:walk({ Note = note_to_sidenote })
-  end
-
   local kind = doc.meta["pdfgen-kind"]
   kind = kind and pandoc.utils.stringify(kind) or ""
   if kind ~= "novel" then

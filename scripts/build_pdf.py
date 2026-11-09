@@ -32,6 +32,9 @@ SKILL_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = SKILL_ROOT / "template"
 META_TEMPLATE = TEMPLATE_DIR / "meta.typ"
 LUA_FILTER = SKILL_ROOT / "filters" / "semantic.lua"
+# Runs before semantic.lua: it rewrites notes and code blocks, which must happen
+# before fenced Divs are flattened into raw Typst.
+FEATURE_FILTER = SKILL_ROOT / "filters" / "features.lua"
 # Vendored Typst Universe packages (ADR-0005).  Typst resolves `@preview/...`
 # imports here when `--package-path` points at it, so no network is needed.
 VENDOR_PACKAGES = SKILL_ROOT / "vendor" / "typst-packages"
@@ -118,6 +121,7 @@ KNOBS: dict[str, tuple[str, object]] = {
     "code.theme": ("codetheme", "default"),
     "code.size": ("length", "9pt"),
     "code.header": ("bool", True),
+    "code.line-numbers": ("bool", False),
     # math -------------------------------------------------------------------
     "math.numbering": ("numbering", "none"),
     # margin notes -----------------------------------------------------------
@@ -843,15 +847,18 @@ def pandoc_meta(path: Path, from_fmt: str) -> str:
     ], from_fmt)
 
 
-def body_typst(inputs: list[Path], from_fmt: str, kind: str, note_style: str = "footnote") -> str:
+def body_typst(inputs: list[Path], from_fmt: str, kind: str, *,
+               note_style: str = "footnote", code_lines: bool = False) -> str:
     need("pandoc", "安装：winget install JohnMacFarlane.Pandoc")
     cmd = [
         "pandoc", "-f", from_fmt, "-t", "typst",
         f"--metadata=pdfgen-kind:{kind}",
         f"--metadata=pdfgen-note-style:{note_style}",
+        f"--metadata=pdfgen-code-lines:{'yes' if code_lines else 'no'}",
     ]
-    if LUA_FILTER.exists():
-        cmd += [f"--lua-filter={LUA_FILTER}"]
+    for lua_filter in (FEATURE_FILTER, LUA_FILTER):
+        if lua_filter.exists():
+            cmd += [f"--lua-filter={lua_filter}"]
     cmd += [str(p) for p in inputs]
     return pandoc_stdout(cmd, from_fmt)
 
@@ -1194,7 +1201,9 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
     else:
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
-        raw_body = body_typst(inputs, from_fmt, str(chosen), str(style["note"]["style"]))
+        raw_body = body_typst(inputs, from_fmt, str(chosen),
+                              note_style=str(style["note"]["style"]),
+                              code_lines=bool(style["code"]["line-numbers"]))
         if "#ref(<eq:" in raw_body and style["math"]["numbering"] == "none":
             raise SpecError(
                 "正文引用了公式（@eq:），但公式没有编号，Typst 无法生成引用。\n"

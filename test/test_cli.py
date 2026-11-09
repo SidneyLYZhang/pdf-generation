@@ -507,6 +507,98 @@ class SidenoteTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("style: margin", out)
 
+    def test_footnote_inside_a_semantic_block_moves_to_the_margin(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "::: {.notice}\n正文[^1]。\n\n[^1]: 块内脚注。\n:::\n",
+            "--set", "note.style=margin",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#sidenote[", self.typ())
+
+
+@unittest.skipUnless(HAVE_DEPS, "需要 typst 与 pandoc")
+class CodeLineNumberTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-test-", dir=str(ROOT)))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def build_doc(self, body: str, *extra: str):
+        md = self.tmp / "doc.md"
+        md.write_text(body, encoding="utf-8")
+        return run_cli(["build", str(md), "-o", str(self.tmp / "doc.pdf"),
+                        "--check", "none", *extra])
+
+    def typ(self) -> str:
+        return (self.tmp / "doc.typ").read_text(encoding="utf-8")
+
+    def test_line_numbers_are_off_by_default(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n```python\na = 1\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("line-numbers: false", self.typ())
+        self.assertNotIn("#numbered-code[", self.typ())
+
+    def test_knob_turns_on_every_code_block(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "```python\na = 1\n```\n\n```python\nb = 2\n```\n",
+            "--set", "code.line-numbers=true",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.typ().count("#numbered-code["), 2)
+
+    def test_single_block_opts_in(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n```python {.line-numbers}\na = 1\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#numbered-code[", self.typ())
+
+    def test_single_block_opts_out(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "```python {.no-line-numbers}\na = 1\n```\n",
+            "--set", "code.line-numbers=true",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("#numbered-code[", self.typ())
+
+    def test_inline_code_is_not_numbered(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n行内 `print(1)` 代码。\n\n```python\na = 1\n```\n",
+            "--set", "code.line-numbers=true",
+        )
+        self.assertEqual(code, 0, err)
+        # Only the block is wrapped; inline code carries no wrapper and, because
+        # the show rule is scoped to the wrapper, cannot be numbered.
+        self.assertEqual(self.typ().count("#numbered-code["), 1)
+
+    def test_code_with_fence_material_still_builds(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "```python {.line-numbers}\n"
+            "line = '``` and ] 和尾随空格   '\n"
+            "other = [1, 2]\n"
+            "```\n",
+            "--set", "code.line-numbers=true",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("和尾随空格", self.typ())
+
+    def test_code_inside_a_semantic_block_is_numbered(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n::: {.notice}\n```python\na = 1\n```\n:::\n",
+            "--set", "code.line-numbers=true",
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        # Wrapping must happen before the Div is flattened, i.e. inside #notice.
+        self.assertLess(typ.index("#notice["), typ.index("#numbered-code["))
+
 
 if __name__ == "__main__":
     unittest.main()

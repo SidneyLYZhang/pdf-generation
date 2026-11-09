@@ -46,6 +46,17 @@ print("hi")
 
 带语言标记才有高亮和顶部语言栏。代码块的等宽字体用 DejaVu Sans Mono，中文自动回退。
 
+行号默认不开。要整篇开：`--set code.line-numbers=true`；只给某一块：
+
+````markdown
+```python {.line-numbers}
+def f(x):
+    return x
+```
+````
+
+整篇开了之后想让某一块不要行号，用 `{.no-line-numbers}`。行号按块从 1 数起，跨页不断号；行内代码永远不带行号。
+
 ## 数学
 
 行内 `$E = mc^2$`，行间 `$$...$$`。两条硬规则：
