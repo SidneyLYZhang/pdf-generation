@@ -94,6 +94,7 @@
 | `heading.size-1` | `22pt` | `19pt` | `14pt` | `17pt` | `22pt` | `22pt` | `20pt` |
 | `heading.size-2` | — | — | — | — | `15pt` | `15pt` | — |
 | `heading.size-3` | — | — | — | — | `12pt` | `12pt` | — |
+| `math.numbering` | — | `(1)` | — | — | `(1)` | — | — |
 | `note.style` | — | — | — | — | — | `margin` | — |
 | `novel.chapter-prefix` | — | — | — | — | `False` | `False` | `True` |
 | `novel.dropcap` | — | — | — | — | `False` | `False` | `True` |

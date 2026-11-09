@@ -1,8 +1,10 @@
--- Line 1-5: the AST-level syntax this filter owns.  Metadata-driven rewrites
--- (margin notes, code line numbers) live in features.lua, which runs first.
+-- Line 1-6: the AST-level syntax this filter owns.  Metadata-driven rewrites
+-- (margin notes, code line numbers, diagrams) live in features.lua and
+-- diagrams.lua, which run first.
 --   fenced divs -> semantic blocks / page breaks / margin notes
 --   spans       -> inline margin notes
 --   Cite        -> cross-references (fig:/tab:/eq:/sec:) vs citations
+--   Str         -> textual \eqref{…} / \ref{…} cross-references
 --   Pandoc      -> kind-specific rewrites (novel drop caps)
 --
 -- Map fenced Divs to the semantic blocks the template provides, and mark the
@@ -108,6 +110,49 @@ function Cite(el)
       out[#out + 1] = pandoc.Space()
       out[#out + 1] = pandoc.Str(suffix)
     end
+  end
+  return out
+end
+
+-- `\eqref{eq:x}` and `\ref{eq:x}` are LaTeX cross-reference syntax.  Our dialect
+-- turns off `raw_tex`, so they arrive as ordinary text; rewrite them here into
+-- the same `#ref` the `@fig:` form produces.  (Lua patterns have no `|`, so the
+-- command name is captured and checked.)
+local LABEL_CHARS = "[%w_:%.%-]"
+local REF_PATTERN = "\\(%a+)%{(" .. LABEL_CHARS .. "+)%}"
+local REF_COMMANDS = { eqref = true, ref = true }
+
+local function ref_inline(target)
+  return pandoc.RawInline("typst", "#ref(<" .. target .. ">)")
+end
+
+function Str(el)
+  if not el.text:find("\\", 1, true) then
+    return nil
+  end
+  local out = {}
+  local scan, flush = 1, 1
+  local changed = false
+  while true do
+    local start, finish, command, target = el.text:find(REF_PATTERN, scan)
+    if not start then
+      break
+    end
+    scan = finish + 1
+    if REF_COMMANDS[command] then
+      if start > flush then
+        out[#out + 1] = pandoc.Str(el.text:sub(flush, start - 1))
+      end
+      out[#out + 1] = ref_inline(target)
+      changed = true
+      flush = scan
+    end
+  end
+  if not changed then
+    return nil
+  end
+  if flush <= #el.text then
+    out[#out + 1] = pandoc.Str(el.text:sub(flush))
   end
   return out
 end

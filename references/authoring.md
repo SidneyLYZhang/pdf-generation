@@ -66,6 +66,28 @@ def f(x):
 
 pandoc 负责把 LaTeX 翻成 Typst 数学：`\frac{a}{b}` → `a/b`，`\alpha` → `alpha`。
 
+**公式编号**：`book` 与 `article` 默认给行间公式编号（`(1)`），其余 Kind 默认不编号；`--set math.numbering=(1)` 打开，`none` 关掉。
+
+**交叉引用**：公式里写 `\label{eq:x}`，正文用 `\eqref{eq:x}`、`\ref{eq:x}` 或 `@eq:x` 引用，三者等价（标签与引用的通用规则见上面的「交叉引用」）。公式没编号时引用会直接报错——先打开 `math.numbering`。
+
+### 转换审计
+
+常见写法的实测结果；标了现象的才需要改写法：
+
+| 写法 | 结果 |
+|------|------|
+| `\frac` `\sqrt` `\sum` `\int` `^` `_` | 正常 |
+| `aligned` `cases` | 正常（`&` 对齐点保留） |
+| `\text{中文}` | 正常，排成直立文字 |
+| `\mathrm` `\mathbb` `\operatorname` | 正常 |
+| `\vec` `\hat` `\cdot` | 正常 |
+| `\,` `\;` `\quad` `\qquad` | 正常（thin / thick / 1em / 2em 空格） |
+| `\mathbf{x}` | 变成直立粗体，不是粗斜体；介意就手写 Typst 数学 |
+| `\tag{...}` | 静默丢弃；编号由模板统一给 |
+| `\nonumber` | 被吞掉，公式**照常编号**（没法只给某一条公式去编号） |
+| `\notag` | **整条公式退回字面文本**，PDF 里能看到 `$$` |
+| 裸的 `\begin{equation}` / `\begin{align}` / `\begin{gather}` | **整段变成字面文本**；改写 `$$\begin{aligned}…\end{aligned}$$` |
+
 ## 语义块（教材 / 笔记）
 
 用 fenced div 标记，class 决定渲染成哪种块：

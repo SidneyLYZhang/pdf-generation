@@ -162,6 +162,26 @@ class CitationStyleTests(unittest.TestCase):
         self.assertEqual(style["cite"]["title"], "References")
 
 
+class MathStyleTests(unittest.TestCase):
+    def test_book_and_article_number_equations(self):
+        self.assertEqual(bp.resolve_style("book", {}, [], "zh")["math"]["numbering"], "(1)")
+        self.assertEqual(bp.resolve_style("article", {}, [], "zh")["math"]["numbering"], "(1)")
+
+    def test_other_kinds_do_not_number(self):
+        for kind in bp.KINDS:
+            if kind in ("book", "article"):
+                continue
+            self.assertEqual(bp.resolve_style(kind, {}, [], "zh")["math"]["numbering"], "none")
+
+    def test_numbering_can_be_turned_off_or_changed(self):
+        self.assertEqual(
+            bp.resolve_style("book", {}, ["math.numbering=none"], "zh")["math"]["numbering"], "none"
+        )
+        self.assertEqual(
+            bp.resolve_style("report", {}, ["math.numbering=1"], "zh")["math"]["numbering"], "1"
+        )
+
+
 class SidenoteStyleTests(unittest.TestCase):
     def test_default_is_footnote_and_textbook_is_margin(self):
         self.assertEqual(bp.resolve_style("report", {}, [], "zh")["note"]["style"], "footnote")

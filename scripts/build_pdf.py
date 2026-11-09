@@ -211,6 +211,7 @@ PRESETS: dict[str, dict[str, object]] = {
         "text.paragraph-spacing": "0.9em",
         "text.first-line-indent": "0em",
         "text.size": "11pt",
+        "math.numbering": "(1)",
     },
     "letter": {
         "cover.enabled": False,
@@ -257,6 +258,7 @@ PRESETS: dict[str, dict[str, object]] = {
         "text.paragraph-spacing": "0.45em",
         "text.first-line-indent": "2em",
         "text.size": "10.5pt",
+        "math.numbering": "(1)",
         "novel.dropcap": False,
         "novel.chapter-prefix": False,
     },
@@ -1394,7 +1396,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
                               diagram_metadata=diagram_filter)
         if "#ref(<eq:" in raw_body and style["math"]["numbering"] == "none":
             raise SpecError(
-                "正文引用了公式（@eq:），但公式没有编号，Typst 无法生成引用。\n"
+                "正文引用了公式（@eq: / \\eqref / \\ref），但公式没有编号，Typst 无法生成引用。\n"
                 "用 --set math.numbering=(1) 打开公式编号，或在 doc.yml 里设 math.numbering。"
             )
         images = local_images(raw_body, first.parent)

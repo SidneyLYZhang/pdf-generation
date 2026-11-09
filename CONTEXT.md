@@ -45,7 +45,7 @@ _Avoid_: 引用、reference
 _Avoid_: 文献表、参考文献列表、refs
 
 **Cross-reference**:
-正文里指向图、表、公式、节的标注，写作 `@fig:…` / `@tab:…` / `@eq:…` / `@sec:…`，编号由模板生成。
+正文里指向图、表、公式、节的标注，写作 `@fig:…` / `@tab:…` / `@eq:…` / `@sec:…`；数学里的 `\eqref{…}` 与 `\ref{…}` 是同一件事的另一种写法。编号由模板生成。
 _Avoid_: 引用、ref、xref
 
 **Sidenote**:

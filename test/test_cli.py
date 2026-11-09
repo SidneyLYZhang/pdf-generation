@@ -415,6 +415,63 @@ class CrossReferenceTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("fig:nope", err)
 
+    def test_eqref_and_ref_become_typst_refs(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "$$ y = mx + b \\label{eq:line} $$\n\n"
+            "式 \\eqref{eq:line} 与 \\ref{eq:line}。\n",
+            "--set", "math.numbering=(1)",
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertEqual(typ.count("#ref(<eq:line>)"), 2)
+        self.assertNotIn("\\eqref", typ)
+        self.assertNotIn("\\ref{", typ)
+
+    def test_undefined_equation_id_fails_and_names_it(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n$$ a = b \\label{eq:a} $$\n\n见 \\eqref{eq:missing}。\n",
+            "--set", "math.numbering=(1)",
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("eq:missing", err)
+
+    def test_non_reference_commands_stay_literal(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "普通 \\ref 与 \\label{eq:z} 以及 \\cite{doe2020} 都保持原文。\n"
+        )
+        self.assertEqual(code, 0, err)
+        body = self.typ().split("#show: doc.with")[-1]
+        self.assertNotIn("#ref(<", body)
+        self.assertIn("\\label{eq:z}", body)
+
+    def test_eqref_without_numbering_fails_with_a_hint(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n$$ y = mx + b \\label{eq:line} $$\n\n式 \\eqref{eq:line}。\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("math.numbering", err)
+
+    def test_book_numbers_equations_without_a_flag(self):
+        code, _, err = self.build_doc(
+            "---\nkind: book\ntitle: 测试\n---\n\n$$ y = mx + b \\label{eq:line} $$\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('numbering: "(1)"', self.typ())
+
+    def test_aligned_and_cases_keep_working_with_refs(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "$$\n\\begin{aligned}\na &= b + c \\\\\nd &= e \\label{eq:sys}\n\\end{aligned}\n$$\n\n"
+            "$$\nf(x) = \\begin{cases} 1 & x > 0 \\\\ 0 & \\text{否则} \\end{cases}\n$$\n\n"
+            "见 \\eqref{eq:sys}。\n",
+            "--set", "math.numbering=(1)",
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("cases(", typ)
+        self.assertIn("#ref(<eq:sys>)", typ)
 
 @unittest.skipUnless(HAVE_DEPS, "需要 typst 与 pandoc")
 class SidenoteTests(unittest.TestCase):
@@ -801,6 +858,7 @@ class DiagramTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("mmdc", out + err)
         self.assertIn("```mermaid", self.typ())
+
 
 
 if __name__ == "__main__":

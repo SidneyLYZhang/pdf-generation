@@ -75,10 +75,10 @@ warning: unknown font family: ...
 
 ### 公式 / 图表没有编号
 
-编号默认关闭或只有单级：
+`book` 与 `article` 默认给公式编号，其余 Kind 默认关闭；图表默认编号一档。要改：
 
 ```bash
---set math.numbering="(1)"      # 公式显示 (1)
+--set math.numbering="(1)"      # 公式显示 (1)；none 关闭
 --set float.numbering="1"       # 图表显示 1
 ```
 
