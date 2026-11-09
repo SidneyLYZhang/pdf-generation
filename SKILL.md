@@ -1,13 +1,13 @@
 ---
 name: pdf-generation
-description: 把 Markdown 排成 PDF：pandoc 只解析，Typst 负责版式，不依赖 LaTeX。当用户要把 .md 转成 PDF、要做报告/白皮书/信函/书稿/教材/小说/笔记、或要调整已有 PDF 的版式与观感时使用。
+description: 把 Markdown 排成 PDF（Typst 排版，不装 LaTeX）：报告、白皮书、信函、书稿、教材、小说、笔记。当用户要把 .md 转成 PDF、按某种文档类型排版、或调整已有 PDF 的版式与观感时使用。
 ---
 
 # PDF Generation
 
 pandoc 把 Markdown 解析成 Typst 源码（`-f` 默认是钉死的 pandoc markdown 扩展串，见 `--from`），版式由本 skill 自带的模板承担，`typst` 直接渲染 PDF。七种 Kind、一个 Style spec、一条固定流程。
 
-流程固定为六步；每一步的末尾给了完成判据，判据不成立就不进入下一步。
+流程六步；每一步末尾的完成判据不成立，就不进入下一步。
 
 ## 1. 扫描
 
@@ -15,9 +15,9 @@ pandoc 把 Markdown 解析成 Typst 源码（`-f` 默认是钉死的 pandoc mark
 python scripts/build_pdf.py detect <输入文件...>
 ```
 
-拿到 JSON：建议 Kind、语言、字数、标题层级、是否含表格/代码/公式/图片/frontmatter 键。
+拿到 JSON：`suggested_kind`、`lang`、字数、标题层级、frontmatter 键，以及 `features` 里的特征位（表格、代码、公式、图片、引文、交叉引用、边注、图表、棋谱……）。
 
-**完成判据**：你能说出建议 Kind、语言，以及源文件里有哪些需要版式支持的元素。
+**完成判据**：你能说出建议 Kind、语言，以及 JSON 里 `features` 为 `true` 的每一项打算怎么排（引文用哪套样式、图表交给哪个渲染器、棋谱用哪种围栏）。
 
 ## 2. Clarify：只问会改变成品的选择
 
@@ -75,7 +75,7 @@ python scripts/build_pdf.py build <输入文件...> [-o out.pdf] [--kind K] [--d
 python scripts/build_pdf.py build book.md ch01.md ch02.md
 ```
 
-产物三件：`<stem>.pdf`（交付）、`<stem>.typ`（自包含，可直接 `typst compile`；用了棋谱的文档要加 `--package-path`，文件头注释里给了现成命令）、`<stem>/` 下的抽页 PNG。
+产物三件：`<stem>.pdf`（交付）、`<stem>.typ`（自包含；手工编译用文件头那行现成命令，需要时带 `--root` / `--package-path`）、`<stem>/` 下的抽页 PNG。
 
 **完成判据**：命令退出码为 0，且输出里有 `PDF ... (N 页)`。
 
@@ -94,7 +94,7 @@ python scripts/build_pdf.py build doc.typ              # 只查已有 .typ
 
 ## 6. 调整
 
-用户说「标题太大 / 页边距再宽点 / 换个配色」时，改旋钮，不动正文。优先级从高到低：`--set` > frontmatter（元数据）> `<stem>.doc.yml` > Kind 默认 > 全局默认。
+用户说「标题太大 / 页边距再宽点 / 换个配色」时，改旋钮，不动正文。优先级从高到低：`--set` > `<stem>.doc.yml` > Kind 默认 > 全局默认；Markdown frontmatter 只提供元数据（标题、作者、`kind`、书目等）。
 
 ```bash
 python scripts/build_pdf.py style doc.md --write doc.doc.yml   # 导出完整 spec
@@ -121,24 +121,24 @@ python scripts/build_pdf.py build doc.md --set heading.size-1=18pt --set color.p
 
 正文里能写什么，按「想排成什么」查：
 
-| 想排 | 写法 | 细节 |
-|------|------|------|
-| 引文 + 参考文献 | frontmatter `bibliography: refs.bib`，正文 `[@key]` | [citations.md](references/citations.md) |
-| 交叉引用 | `{#fig:x}` + `@fig:x`；公式 `\label{eq:x}` + `\eqref{}` / `@eq:` | [authoring.md](references/authoring.md) |
-| 边注 | `[文字]{.sidenote}` 或 `::: {.sidenote}` | [authoring.md](references/authoring.md) |
-| 代码行号 | `--set code.line-numbers=true`，或单块 `{.line-numbers}` | [authoring.md](references/authoring.md) |
-| 图表 | ```` ```dot ```` / ```` ```mermaid ```` 围栏 | [authoring.md](references/authoring.md) |
-| 公式编号 | 自动（book/article）或 `--set math.numbering=(1)` | [authoring.md](references/authoring.md) |
-| 棋谱 | ```` ```fen ```` / ```` ```pgn ```` / ```` ```notation ```` | [chess.md](references/chess.md) |
+| 想排 | 写法 |
+|------|------|
+| 引文 + 参考文献 | frontmatter `bibliography: references.bib`，正文 `[@key]` |
+| 交叉引用 | `{#fig:x}` + `@fig:x`；公式 `\label{eq:x}` + `\eqref{}` / `@eq:` |
+| 边注 | `[文字]{.sidenote}` 或 `::: {.sidenote}` |
+| 代码行号 | `--set code.line-numbers=true`，或单块 `{.line-numbers}` |
+| 图表 | ```` ```dot ```` / ```` ```mermaid ```` 围栏 |
+| 公式编号 | 自动（book/article）或 `--set math.numbering=(1)` |
+| 棋谱 | ```` ```fen ```` / ```` ```pgn ```` / ```` ```notation ```` |
+
+引文细节见 [references/citations.md](references/citations.md)，棋谱见 [references/chess.md](references/chess.md)，其余见 [references/authoring.md](references/authoring.md)。
 
 ## 参考
 
 按需读取，不必预先加载：
 
-- [references/kinds.md](references/kinds.md) — 七种 Kind 的版式细节、frontmatter 示例、默认值
 - [references/style-knobs.md](references/style-knobs.md) — 全部旋钮、取值格式、各 Kind 覆盖表
-- [references/authoring.md](references/authoring.md) — Markdown 方言：数学、语义块、信函字段、多文件、图片
-- [references/citations.md](references/citations.md) — 引文与书目：声明、样式、`.csl`、与交叉引用的分工
-- [references/chess.md](references/chess.md) — 棋谱：fen / pgn / notation 围栏与选项
 - [references/troubleshooting.md](references/troubleshooting.md) — 报错与版式问题的处理
 - [INSTALL.md](INSTALL.md) — 安装（分「用户」与「Agent」两部分）
+
+Kind 速查与内容速查已经链到 kinds、authoring、citations、chess 四份文档。

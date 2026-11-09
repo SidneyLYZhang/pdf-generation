@@ -58,7 +58,7 @@ DESC = {
     "note.width": "边注栏宽度",
     "note.gap": "边注与正文之间的间距",
     "note.size": "边注字号",
-    "cite.enabled": "是否生成参考文献表；auto = 声明了 `bibliography` 才生成",
+    "cite.enabled": "是否生成参考文献表；true / false / auto（auto = 声明了 `bibliography` 才生成）",
     "cite.style": "CSL 样式：内置名（`ieee` / `apa` / `gb-7714-2015-numeric` …）或 `.csl` 路径；auto 按语言与 Kind 取默认",
     "cite.title": "参考文献标题；auto 按语言取「参考文献 / References」",
     "semantic.numbering": "语义块编号格式，如 1 / (1)；none 表示只显示标签不编号",

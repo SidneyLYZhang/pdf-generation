@@ -6,7 +6,7 @@
 - **可调排版**：五十多个旋钮，纸张、字体、行距、页眉、配色逐项可改
 - **先问后做**：内置 Clarify 阶段，只问会改变成品的选择，并给推荐值
 - **内容能力**：引文与 CSL 参考文献、图/表/公式/节交叉引用、边注、代码行号、mermaid/graphviz 图表、国际象棋棋谱（内联 staunton）
-- **自包含产物**：生成的 `.typ` 内联整个模板，可直接 `typst compile` 复现（用了棋谱的文档例外：它要 `--package-path` 指向内联的 staunton）
+- **自包含产物**：生成的 `.typ` 内联整个模板，可直接 `typst compile` 复现；图片在输出目录之外、或文档用了棋谱时，按文件头那行现成命令加上 `--root` / `--package-path`
 
 ## 安装
 
@@ -45,7 +45,7 @@ Kind 可以写在 frontmatter（`kind: novel`），也可以 `--kind novel`。�
 
 ## 调排版
 
-所有排版参数收敛在一个 Style spec 里，优先级：`--set` > frontmatter（元数据）> `<stem>.doc.yml` > Kind 默认 > 全局默认。
+所有排版参数收敛在一个 Style spec 里，优先级：`--set` > `<stem>.doc.yml` > Kind 默认 > 全局默认；Markdown frontmatter 只提供元数据（标题、作者、`kind`、书目等）。
 
 ```yaml
 # report.doc.yml
@@ -72,7 +72,7 @@ python scripts/build_pdf.py build report.md                        # 自动读�
 ## Markdown 写法
 
 - 方言是钉死的 pandoc markdown：引文 `[@key]`、交叉引用 `@fig:`、围栏参数、图片题注、`::: {.theorem}` 语义块都能用。
-- 引文要先在 frontmatter 里写 `bibliography: refs.bib`，见 [references/citations.md](references/citations.md)。
+- 引文要先在 frontmatter 里写 `bibliography: references.bib`，见 [references/citations.md](references/citations.md)。
 - 数学 `$x$` 内侧不能有空格；LaTeX 命令用 `\alpha`、`\frac` 这类合法写法；`\label` / `\eqref` 可做公式交叉引用。
 - 边注用 `[文字]{.sidenote}`、代码行号用 `{.line-numbers}`、图表用 ```` ```dot ```` 围栏、棋谱用 ```` ```fen ````。
 - 信函字段写在 frontmatter 的 `letter:` 下，字符串内 `\n` 表示换行。
@@ -91,13 +91,17 @@ pdf-generation/
 ├── docs/adr/                # 关键决策记录
 ├── template/                # Typst 模板（构建时内联进产物）
 │   ├── 00-util.typ          # 中文数字、页边距、纸张
-│   ├── 20-frontmatter.typ   # 封面、文章标题块、目录、信函头尾
+│   ├── 20-frontmatter.typ   # 封面、文章标题块、目录、信函头尾、参考文献
 │   ├── 30-blocks.typ        # 定理/定义/例题等语义块
+│   ├── 32-code.typ          # 代码块与行号
+│   ├── 35-notes.typ         # 边注（脚注可改排页边）
+│   ├── 38-chess.typ         # 棋谱 import（只在用到时内联）
 │   ├── 40-kinds.typ         # 小说章首、首字下沉
 │   ├── 90-doc.typ           # 主装配
 │   └── meta.typ             # pandoc 元数据模板
 ├── filters/features.lua     # 元数据驱动的重写：笔记模式、代码行号（先跑）
-├── filters/semantic.lua     # ::: div → 语义块；@ 引用；章首首段标记
+├── filters/refs.lua         # @fig: 交叉引用与 \eqref / \ref
+├── filters/semantic.lua     # ::: div → 语义块；章首首段标记
 ├── filters/diagrams.lua     # 图表围栏 → figure（元数据驱动）
 ├── filters/chess.lua        # 棋谱围栏 → staunton 调用
 ├── vendor/typst-packages/   # 内联的 staunton 2.0.0（GPL 子目录，见 NOTICE）

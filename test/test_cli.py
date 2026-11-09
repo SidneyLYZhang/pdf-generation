@@ -341,6 +341,19 @@ class CitationTests(unittest.TestCase):
         self.assertIn("bibliography", err)
         self.assertIn("doe2020", err)
 
+    def test_citation_inside_a_fence_needs_no_bibliography(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n正文没有引文。\n\n```markdown\n引用写成 [@doe2020]。\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+
+    def test_cite_enabled_accepts_auto(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n正文 [@doe2020]。\n",
+            "--set", "cite.enabled=auto",
+        )
+        self.assertEqual(code, 0, err)
+
     def test_unknown_citation_key_fails(self):
         code, _, err = self.build_doc(
             "---\ntitle: 测试\nbibliography: refs.bib\n---\n\n正文 [@smith2021]。\n"
@@ -872,6 +885,19 @@ class DiagramTests(unittest.TestCase):
         self.assertIn('caption: [#text("Mermaid 示例")]', typ)
         self.assertIn("<fig:flow>", typ)
         self.assertIn("#ref(<fig:flow>)", typ)
+
+    @unittest.skipUnless(not shutil.which("mmdc"), "本机装了 mmdc 就测不到降级")
+    def test_degraded_diagram_stays_in_the_figure_sequence(self):
+        # A code body would make Typst number it as a "Listing"; the explicit
+        # kind keeps it at 图 / Figure with the rest of the figures.
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            '```mermaid {#fig:flow caption="流程"}\ngraph TD; A-->B;\n```\n'
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn('kind: "image"', typ)
+        self.assertIn("supplement:", typ)
 
     @unittest.skipUnless(not shutil.which("mmdc"), "本机装了 mmdc 就测不到降级")
     def test_mermaid_without_renderer_falls_back_to_source(self):

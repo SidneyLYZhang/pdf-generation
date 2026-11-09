@@ -172,9 +172,11 @@ python scripts/build_pdf.py build examples/report.md
 ├── scripts/build_pdf.py
 ├── template/*.typ    ← 构建时按文件名顺序内联
 ├── filters/features.lua
+├── filters/refs.lua
 ├── filters/semantic.lua
 ├── filters/diagrams.lua
 ├── filters/chess.lua
+├── vendor/typst-packages/   ← 棋谱用的 staunton，漏搬会让含棋谱的文档构建失败
 ├── references/*.md
 └── examples/*.md
 ```

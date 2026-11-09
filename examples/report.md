@@ -4,7 +4,7 @@ subtitle: "留存、转化与渠道效率的结构性变化"
 author: "张三"
 org: "示例部门"
 date: "2026 年 11 月"
-bibliography: refs.bib
+bibliography: references.bib
 ---
 
 # 执行摘要
@@ -90,3 +90,4 @@ def retention(cohort, day):
 ```
 
 所有指标在口径变更时会在 `metrics.yaml` 中记录版本，历史数据不回溯重算。
+

@@ -40,6 +40,9 @@ FEATURE_FILTER = SKILL_ROOT / "filters" / "features.lua"
 DIAGRAM_FILTER = SKILL_ROOT / "filters" / "diagrams.lua"
 # No-op unless the build passed `pdfgen-chess`.
 CHESS_FILTER = SKILL_ROOT / "filters" / "chess.lua"
+# `@fig:` cross-references and textual \eqref / \ref.  Runs before semantic.lua,
+# whose Div handler serializes its content into Typst.
+REFS_FILTER = SKILL_ROOT / "filters" / "refs.lua"
 # Vendored Typst Universe packages (ADR-0005).  Typst resolves `@preview/...`
 # imports here when `--package-path` points at it, so no network is needed.
 VENDOR_PACKAGES = SKILL_ROOT / "vendor" / "typst-packages"
@@ -318,9 +321,11 @@ CODE_THEMES = {"default", "none"}
 
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
-# A `@key` left in the generated body is a citation; emails (`a@b.com`) and
-# already-converted references (`#ref(<…>)`) do not match.
-CITATION_RE = re.compile(r"(?<![\w@])@([A-Za-z][\w:.\-]*)")
+# A `@key` in the prose is a citation; emails (`a@b.com`) and the reserved
+# cross-reference prefixes (`@fig:` `@tab:` `@eq:` `@sec:`) do not match.  The
+# look-behind is ASCII-only on purpose: a CJK character before `@` is still a
+# citation (`参考@doe2020`), while an ASCII one is an email address.
+CITATION_RE = re.compile(r"(?<![A-Za-z0-9_@])@(?!(?:fig|tab|eq|sec):)([A-Za-z][\w:.\-]*)")
 
 # Margin notes, both written as `{.sidenote}`: inline on a span, block on a div.
 INLINE_NOTE_RE = re.compile(r"\[([^\]]*)\]\{[^}]*\.sidenote[^}]*\}")
@@ -394,23 +399,15 @@ SQUARE_LIST_RE = re.compile(r"^[a-h][1-8](,[a-h][1-8])*$")
 ARROW_LIST_RE = re.compile(r"^[a-h][1-8][a-h][1-8](,[a-h][1-8][a-h][1-8])*$")
 
 
-def prepare_chess(inputs: list[Path]) -> bool:
+def validate_chess_fences(inputs: list[Path]) -> bool:
     """Validate chess fences; return whether the document needs the package."""
     needed = False
     for path in inputs:
         text = path.read_text(encoding="utf-8", errors="replace")
-        for start, _, _, info, _ in iter_fences(text):
-            lang, attrs = parse_fence_info(info)
-            if lang not in CHESS_LANGS:
-                continue
+        for start, lang, attrs, _ in scanned_fences(text, CHESS_LANGS):
             needed = True
             valid = CHESS_NOTATION_ATTRS if lang == "notation" else CHESS_DIAGRAM_ATTRS
-            unknown = sorted(set(attrs) - set(valid))
-            if unknown:
-                raise SpecError(
-                    f"{path}:{start} 的 {lang} 围栏有不认识的选项：{', '.join(unknown)}；"
-                    f"可用：{', '.join(valid)}"
-                )
+            reject_unknown(start, lang, attrs, valid, str(path))
             for flag in CHESS_BOOL_FLAGS:
                 value = attrs.get(flag)
                 if value is not None and value.lower() not in ("true", "false", "yes", "no"):
@@ -507,21 +504,34 @@ def parse_fence_info(info: str) -> tuple[str, dict[str, str]]:
     return lang.strip().lower(), attrs
 
 
-def find_diagram_blocks(text: str, where: str = "") -> list[dict]:
-    """Diagram fences in `text`, with the line their fence starts on."""
-    blocks: list[dict] = []
+def scanned_fences(text: str, langs) -> list[tuple[int, str, dict, str]]:
+    """`(start_line, lang, attrs, body)` for fences whose language is in `langs`."""
+    found = []
     for start, _, _, info, body in iter_fences(text):
         lang, attrs = parse_fence_info(info)
-        if lang not in DIAGRAM_RENDERERS:
-            continue
-        unknown = sorted(set(attrs) - set(DIAGRAM_ATTRS))
-        if unknown:
-            location = f"{where}:{start}" if where else f"第 {start} 行"
-            raise SpecError(
-                f"{location}的 {lang} 图有不认识的选项：{', '.join(unknown)}；"
-                f"可用：{', '.join(DIAGRAM_ATTRS)}"
-            )
-        blocks.append({"lang": lang, "attrs": attrs, "text": "\n".join(body), "line": start})
+        if lang in langs:
+            found.append((start, lang, attrs, "\n".join(body)))
+    return found
+
+
+def reject_unknown(start: int, lang: str, attrs: dict, allowed, where: str = "",
+                   what: str = "围栏") -> None:
+    unknown = sorted(set(attrs) - set(allowed))
+    if not unknown:
+        return
+    location = f"{where}:{start}" if where else f"第 {start} 行"
+    raise SpecError(
+        f"{location}的 {lang} {what}有不认识的选项：{', '.join(unknown)}；"
+        f"可用：{', '.join(allowed)}"
+    )
+
+
+def find_diagram_blocks(text: str, where: str = "") -> list[dict]:
+    """Diagram fences in `text`, with the line their fence starts on."""
+    blocks = []
+    for start, lang, attrs, body in scanned_fences(text, DIAGRAM_RENDERERS):
+        reject_unknown(start, lang, attrs, DIAGRAM_ATTRS, where, what="图")
+        blocks.append({"lang": lang, "attrs": attrs, "text": body, "line": start})
     return blocks
 
 
@@ -531,7 +541,7 @@ def renderer_command(lang: str) -> list[str] | None:
     resolved = shutil.which(binary)
     if not resolved:
         return None
-    # npm installs `mmdc.cmd` on Windows, which CreateProcess cannot start直接.
+    # npm installs `mmdc.cmd` on Windows, which CreateProcess cannot launch directly.
     if resolved.lower().endswith((".cmd", ".bat")):
         return ["cmd", "/c", resolved]
     return [resolved]
@@ -823,6 +833,10 @@ def coerce(path: str, value: object) -> object:
             return value
         if isinstance(value, str):
             low = value.strip().lower()
+            # A bool knob whose default is `auto` (cite.enabled) can be set
+            # back to auto explicitly; the default documents that form.
+            if low == "auto" and KNOBS[path][1] == "auto":
+                return "auto"
             if low in ("true", "yes", "on", "1"):
                 return True
             if low in ("false", "no", "off", "0"):
@@ -1116,7 +1130,8 @@ def pandoc_meta(path: Path, from_fmt: str) -> str:
 
 def body_typst(inputs: list[Path], from_fmt: str, kind: str, *,
                note_style: str = "footnote", code_lines: bool = False,
-               diagram_metadata: Path | None = None, chess_lang: str = "") -> str:
+               diagram_metadata: Path | None = None, chess_lang: str = "",
+               lang: str = "") -> str:
     need("pandoc", "安装：winget install JohnMacFarlane.Pandoc")
     cmd = [
         "pandoc", "-f", from_fmt, "-t", "typst",
@@ -1124,11 +1139,13 @@ def body_typst(inputs: list[Path], from_fmt: str, kind: str, *,
         f"--metadata=pdfgen-note-style:{note_style}",
         f"--metadata=pdfgen-code-lines:{'yes' if code_lines else 'no'}",
     ]
+    if lang:
+        cmd.append(f"--metadata=pdfgen-lang:{lang}")
     if chess_lang:
         cmd.append(f"--metadata=pdfgen-chess:{chess_lang}")
     if diagram_metadata is not None:
         cmd.append(f"--metadata-file={diagram_metadata}")
-    for lua_filter in (DIAGRAM_FILTER, CHESS_FILTER, FEATURE_FILTER, LUA_FILTER):
+    for lua_filter in (DIAGRAM_FILTER, CHESS_FILTER, FEATURE_FILTER, REFS_FILTER, LUA_FILTER):
         if not lua_filter.exists():
             raise SpecError(f"缺少 Lua filter {lua_filter}（技能目录不完整，重新安装）")
         cmd += [f"--lua-filter={lua_filter}"]
@@ -1264,21 +1281,27 @@ def root_from_typ(typ: Path) -> Path | None:
 
 def compose(typ_path: Path, *, meta_ty: str, letter_ty: str, bib_ty: str, style: dict,
             body: str, root: Path | None = None, include_chess: bool = False) -> None:
+    root_needed = root is not None and root.resolve() != typ_path.parent.resolve()
+    manual = ["typst", "compile"]
+    if root_needed:
+        manual += ["--root", root.as_posix()]
+    if include_chess:
+        manual += ["--package-path", VENDOR_PACKAGES.as_posix()]
+    manual += [typ_path.name]
     header = (
         "// Generated by the pdf-generation skill. Rebuilding overwrites this\n"
         "// file; to hand-edit it, build once, edit, then rerun with --keep-typ.\n"
-        "// Everything here is self-contained, so `typst compile <this file>`\n"
-        "// reproduces the PDF without the skill.\n"
+        "// Everything here is self-contained, so `typst compile` reproduces the\n"
+        "// PDF without the skill — with the flags on the manual-build line below\n"
+        "// when the document needs them.\n"
     )
-    if root is not None and root.resolve() != typ_path.parent.resolve():
+    if root_needed:
         # Only recorded when assets live outside the .typ's own directory: that
         # is when paths are root-relative and `typst compile` needs --root.
         header += f"// pdfgen-root: {root.as_posix()}\n"
-    if include_chess:
-        header += (
-            "// Chess needs the vendored package, so a manual build is:\n"
-            f"//   typst compile --package-path \"{VENDOR_PACKAGES}\" <this file>\n"
-        )
+    if root_needed or include_chess:
+        flags = " ".join(f'"{part}"' if " " in part else part for part in manual[:-1])
+        header += f"// 手工编译：{flags} {manual[-1]}\n"
     style_lit = typst_dict(style, KNOBS)
     text = "\n".join([
         header,
@@ -1491,7 +1514,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
         diagram_filter, diagram_warnings = prepare_diagrams(inputs, first.parent)
-        needs_chess = prepare_chess(inputs)
+        needs_chess = validate_chess_fences(inputs)
         if needs_chess and not VENDOR_PACKAGES.exists():
             raise SpecError(
                 "文档里有棋谱围栏，但 vendor/typst-packages 不存在；"
@@ -1501,6 +1524,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
                               note_style=str(style["note"]["style"]),
                               code_lines=bool(style["code"]["line-numbers"]),
                               diagram_metadata=diagram_filter,
+                              lang=str(style["text"]["lang"]),
                               chess_lang=str(style["text"]["lang"]) if needs_chess else "")
         if "#ref(<eq:" in raw_body and style["math"]["numbering"] == "none":
             raise SpecError(
@@ -1508,11 +1532,13 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
                 "用 --set math.numbering=(1) 打开公式编号，或在 doc.yml 里设 math.numbering。"
             )
         if not style["cite"]["enabled"]:
-            citation = CITATION_RE.search(raw_body)
+            # Scan the prose, not the emitted Typst: a fence that merely shows
+            # `[@key]` is documentation, not a citation.
+            citation = CITATION_RE.search(prose_only(source_text))
             if citation:
                 raise SpecError(
                     f"正文有引文（@{citation.group(1)}），但没有参考文献表可指向它。\n"
-                    "在 frontmatter 写 bibliography: refs.bib，或删掉这些引用。"
+                    "在 frontmatter 写 bibliography: references.bib，或删掉这些引用。"
                 )
         images = local_images(raw_body, first.parent)
         csl_path = resolve_csl(str(style["cite"]["style"]), first.parent)

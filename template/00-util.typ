@@ -48,22 +48,25 @@
   if pos == "none" { center } else if pos == "footer-right" { right } else { center }
 }
 
-// Paper dimensions live here once: `paper-args` needs a name for Typst's page
-// setup, margin notes need the width as a length.
+// Paper dimensions live here once: `paper-args` derives Typst's page setup from
+// the same table, and margin notes take the width as a length.
+#let paper-table = (
+  a4: (width: 210mm, height: 297mm, paper: "a4"),
+  a5: (width: 148mm, height: 210mm, paper: "a5"),
+  "6x9": (width: 6in, height: 9in),
+  letter: (width: 8.5in, height: 11in, paper: "us-letter"),
+)
+
+#let paper-spec(st) = paper-table.at(st.page.paper, default: paper-table.a4)
+
 #let paper-size(st) = {
-  let name = st.page.paper
-  if name == "a4" { (width: 210mm, height: 297mm) }
-  else if name == "a5" { (width: 148mm, height: 210mm) }
-  else if name == "6x9" { (width: 6in, height: 9in) }
-  else if name == "letter" { (width: 8.5in, height: 11in) }
-  else { (width: 210mm, height: 297mm) }
+  let spec = paper-spec(st)
+  (width: spec.width, height: spec.height)
 }
 
 #let paper-args(st) = {
-  let name = st.page.paper
-  if name == "6x9" { (width: 6in, height: 9in) }
-  else if name == "letter" { (paper: "us-letter") }
-  else { (paper: name) }
+  let spec = paper-spec(st)
+  if "paper" in spec { (paper: spec.paper) } else { (width: spec.width, height: spec.height) }
 }
 
 #let paper-width(st) = paper-size(st).width

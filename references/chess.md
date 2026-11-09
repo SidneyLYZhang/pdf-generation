@@ -47,7 +47,7 @@ r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3
 | `labels` | 坐标标签 | `true` |
 | `check` | 将军高亮 | `false` |
 | `last-move` | 上一手标注：`none` / `arrow` / `squares`；只有 `pgn` 有上一步可标 | `none` |
-| `theme` | 配色：`wikipedia` / `wood` 之外的 11 个内置名（报错时会列全） | `staunton-default` |
+| `theme` | 棋盘配色：11 个内置名之一（`wikipedia` / `coral` / `emerald` / …；写错会报错并列出全部） | `staunton-default` |
 | `arrows` | 箭头，逗号分隔的 `起点终点`，如 `f3e5,f1c4` | 无 |
 | `highlight` | 高亮格子，如 `e5,d4` | 无 |
 | `at` | 仅 `pgn`：出某一手的局面 | 无 |

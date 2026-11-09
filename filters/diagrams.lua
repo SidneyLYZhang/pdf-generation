@@ -55,6 +55,10 @@ local function render_figure(entry)
   return pandoc.RawBlock("typst", figure)
 end
 
+-- The supplement of a degraded figure: an explicit `kind: "image"` opts out of
+-- Typst's inferred supplement, so it has to be spelled out.
+local supplement = "[Figure]"
+
 -- No renderer for this language: show the source, but keep the figure so the
 -- caption, the number and `@fig:` references still work.
 local function source_figure(el, entry)
@@ -64,7 +68,10 @@ local function source_figure(el, entry)
     return nil
   end
   local inner = pandoc.write(pandoc.Pandoc({ el }), "typst"):gsub("%s+$", "")
-  local figure = "#figure(\n" .. inner .. "\n"
+  -- `kind: "image"` keeps a degraded diagram in the figure sequence: Typst
+  -- infers "raw" from a code body and would number it as a listing.
+  local figure = "#figure(\n" .. inner
+    .. "\n, kind: \"image\", supplement: " .. supplement
   if caption then
     figure = figure .. ", caption: [#text(" .. typst_string(caption) .. ")]"
   end
@@ -79,6 +86,10 @@ function Pandoc(doc)
   local map = doc.meta["pdfgen-diagrams"]
   if map == nil then
     return doc
+  end
+  local lang = doc.meta["pdfgen-lang"]
+  if lang ~= nil and pandoc.utils.stringify(lang):sub(1, 2) == "zh" then
+    supplement = "[图]"
   end
   local index = 0
   return doc:walk({

@@ -165,7 +165,7 @@ digraph G { rankdir=LR; 采集 -> 清洗 -> 入库; }
 ```
 
 - 行内用 span、块级用 div，**类名都是 `.sidenote`**。
-- 只要出现显式标记，文档自动切到边注模式：外侧页边加宽，正文宽度相应减小。只有你显式设了 `note.style=footnote` 时才不切——那时边注退化成脚注（优先级 `--set` > frontmatter > doc.yml）。
+- 只要出现显式标记，文档自动切到边注模式：外侧页边加宽，正文宽度相应减小。只有你显式设了 `note.style=footnote` 时才不切——那时边注退化成脚注（优先级 `--set` > `doc.yml`）。
 - 想让普通脚注也走页边：`--set note.style=margin`（`textbook` 默认就是 margin）；默认 `footnote`，脚注留在页脚。
 - 旋钮：`note.width`（边注栏宽，默认 4.2cm）、`note.gap`（与正文的间距，12pt）、`note.size`（8pt）。
 - 边注是**浮动定位**：贴在锚点那一行，不占垂直空间。两条边注挨太近会重叠，构建时会警告；单条超过 200 字也会警告——那种长度更适合脚注。
@@ -180,7 +180,7 @@ digraph G { rankdir=LR; 采集 -> 清洗 -> 入库; }
 ```yaml
 ---
 title: 报告
-bibliography: refs.bib
+bibliography: references.bib
 ---
 ```
 

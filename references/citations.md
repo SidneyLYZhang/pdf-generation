@@ -7,7 +7,7 @@
 ```yaml
 ---
 title: 报告
-bibliography: refs.bib
+bibliography: references.bib
 ---
 ```
 
