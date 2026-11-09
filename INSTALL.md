@@ -111,6 +111,8 @@ rm -rf ~/.dsh/skills/pdf-generation             # 卸载
 
 注意许可：棋子 SVG 是 GPL-2.0-or-later，该目录单独挂 `LICENSE` 与 `NOTICE.md`，仓库其余部分仍是 MIT。
 
+构建时会自动带上 `--package-path`；手工 `typst compile` 一份含棋谱的 `.typ` 时也要加，生成的 `.typ` 头部注释里写了完整命令。
+
 ### 附：图表渲染器（可选）
 
 `dot` / `mermaid` 围栏要出图，才需要对应的渲染器：

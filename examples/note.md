@@ -32,7 +32,7 @@ date: "2026-11-06"
 
 # 代码片段
 
-```python
+```python {.line-numbers}
 import numpy as np
 
 def mde(sigma, n, alpha=0.05, power=0.8):
@@ -46,6 +46,23 @@ def mde(sigma, n, alpha=0.05, power=0.8):
 ::: {.warning}
 如果每个用户的指标是「是否留存」这种 0/1 变量，`sigma` 应取 `sqrt(p * (1 - p))`，其中 `p` 是基线留存率。
 :::
+
+# 分流链路
+
+一次实验的分流要经过几道关口，任何一道漏掉都会污染样本：
+
+```dot {#fig:split caption="分流链路" width=80%}
+digraph G {
+  rankdir=LR;
+  A [label="进入"];
+  B [label="资格校验"];
+  C [label="哈希分桶"];
+  D [label="曝光"];
+  A -> B -> C -> D;
+}
+```
+
+@fig:split 里「资格校验」是最常被跳过的一步。
 
 # 复盘清单
 

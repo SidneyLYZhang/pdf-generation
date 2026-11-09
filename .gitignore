@@ -11,6 +11,7 @@ examples/**/*.typ
 .tmpcheck/
 .scratch/
 .pdfgen-test-*/
+pdfgen-doctor-*/
 
 # OS
 .DS_Store

@@ -173,6 +173,8 @@ digraph G { rankdir=LR; 采集 -> 清洗 -> 入库; }
 
 ## 引文与书目
 
+完整说明（样式选择、`.csl`、与交叉引用的分工）见 [citations.md](citations.md)。最小写法：
+
 在 frontmatter 声明书目文件，正文用 `[@key]` 标注引文：
 
 ```yaml
@@ -188,11 +190,9 @@ bibliography: refs.bib
 ```
 
 - 数据文件支持 `.bib`（BibTeX）、`.json`（CSL-JSON）、`.yml`（Hayagriva），路径相对 Markdown。
-- `cite.enabled` 默认 `auto`：声明了 `bibliography` 才生成参考文献表；想关掉设成 `false`。
-- 默认样式：中文 `gb-7714-2015-numeric`，英文 `ieee`，`article` 用 `apa`。换成内置样式名或 `.csl` 路径：`--set cite.style=apa`、`cite.style: vancouver`。
-- 标题默认「参考文献 / References」，进目录；`cite.title` 可改。
+- `cite.enabled` 默认 `auto`：声明了 `bibliography` 才生成参考文献表。设成 `false` 只适用于「声明了书目但不输出列表、正文也没有引用」的场合——正文只要有 `[@key]`，构建会直接失败并提示。
 - 缺书目文件、缺 key 都会让构建失败并指出名字，不会静默排出裸 key。
-- 坑：`gb-7714-2015-numeric` 不显示页码定位（CSL 实现所限），需要页码就用 `ieee` / `apa`，或把页码写进正文。
+- 样式选择、`.csl`、标题与页码定位的细节见 [citations.md](citations.md)。
 
 ## 交叉引用
 
@@ -210,11 +210,11 @@ bibliography: refs.bib
 
 $$ y = mx + b \label{eq:line} $$
 
-见图 @fig:channels、表 @tab:slots、式 @eq:line，见 @sec:method。
+@fig:channels、@tab:slots、@eq:line，以及 @sec:method。
 ```
 
 - 保留前缀只有四个：`fig:` `tab:` `eq:` `sec:`。**其余 `@id` 一律当引文**，所以书目 key 别用这四个前缀。
-- 编号文字由 Typst 生成（「图 1」「表 1」「式 1」「小节 1」），不要在正文里手写。
+- 编号文字由 Typst 生成（「图 1」「表 1」「式 1」「小节 1」），不要在正文里手写。**引用本身已经带上了前缀**，所以写「见 @fig:roi」，不要写「见图 @fig:roi」——后者会排出「见图 图 1」。
 - 指向不存在的 id 会构建失败并打印那个 id。
 - 公式必须先有编号才能被指向：`math.numbering` 为 `none` 时会直接报错，用 `--set math.numbering=(1)` 打开。
 

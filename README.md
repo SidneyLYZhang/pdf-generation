@@ -5,6 +5,7 @@
 - **七种版式**：报告、文章、信函、笔记、书、教材、小说
 - **可调排版**：五十多个旋钮，纸张、字体、行距、页眉、配色逐项可改
 - **先问后做**：内置 Clarify 阶段，只问会改变成品的选择，并给推荐值
+- **内容能力**：引文与 CSL 参考文献、图/表/公式/节交叉引用、边注、代码行号、mermaid/graphviz 图表、国际象棋棋谱（内联 staunton）
 - **自包含产物**：生成的 `.typ` 内联整个模板，可直接 `typst compile` 复现（用了棋谱的文档例外：它要 `--package-path` 指向内联的 staunton）
 
 ## 安装
@@ -71,7 +72,9 @@ python scripts/build_pdf.py build report.md                        # 自动读�
 ## Markdown 写法
 
 - 方言是钉死的 pandoc markdown：引文 `[@key]`、交叉引用 `@fig:`、围栏参数、图片题注、`::: {.theorem}` 语义块都能用。
-- 数学 `$x$` 内侧不能有空格；LaTeX 命令用 `\alpha`、`\frac` 这类合法写法。
+- 引文要先在 frontmatter 里写 `bibliography: refs.bib`，见 [references/citations.md](references/citations.md)。
+- 数学 `$x$` 内侧不能有空格；LaTeX 命令用 `\alpha`、`\frac` 这类合法写法；`\label` / `\eqref` 可做公式交叉引用。
+- 边注用 `[文字]{.sidenote}`、代码行号用 `{.line-numbers}`、图表用 ```` ```dot ```` 围栏、棋谱用 ```` ```fen ````。
 - 信函字段写在 frontmatter 的 `letter:` 下，字符串内 `\n` 表示换行。
 - 多文件：`build book.md ch01.md ch02.md`，第一个文件管元数据。
 
@@ -100,7 +103,7 @@ pdf-generation/
 ├── vendor/typst-packages/   # 内联的 staunton 2.0.0（GPL 子目录，见 NOTICE）
 ├── scripts/build_pdf.py     # detect / build / style / check / doctor
 ├── test/                    # 无第三方依赖的测试
-├── references/              # kinds / style-knobs / authoring / chess / troubleshooting
+├── references/              # kinds / style-knobs / authoring / citations / chess / troubleshooting
 └── examples/                # 七种 Kind 各一份样张
 ```
 
@@ -114,9 +117,12 @@ python -m unittest discover -s test -v
 
 ## 已知限制
 
-- 没有参考文献/引文管理、边注、代码行号。
+- **边注是浮动定位**：它贴在锚点那一行，不占垂直空间；两条锚得太近会重叠，构建时会警告（没有自动避让）。
+- **`gb-7714-2015-numeric` 不显示页码定位**：`[@key, p. 33]` 在这个样式下只出编号；需要页码就用 `ieee` / `apa`。
+- **棋谱的自动题注是英文**（`White to move`、`Position after 17. Rd8#`），中文文档只把编号前缀换成「棋图」。
+- **图表要可选渲染器**：`dot` 来自 Graphviz、`mermaid` 要 `mmdc`；没装时图按源码排出并给警告，构建不失败。
 - Typst 0.15 在段距接近 0 时会把下一段抬高半行，构建脚本据此把最小段距定为 4.5pt；书/小说因此有一点点段间距。
-- 不联网拉 Typst 包，模板全部内置。
+- **运行时不联网**：模板与 staunton 都在仓库里；只有手动 `typst compile` 棋谱文档时需要 `--package-path`。
 
 ## License
 

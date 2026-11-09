@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import base64
 import io
+import json
 import os
 import shutil
 import sys
@@ -117,6 +118,20 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn('"suggested_kind": "report"', out)
         self.assertIn('"table": true', out)
+
+    def test_detect_reports_content_features(self):
+        md = self.tmp / "features.md"
+        md.write_text(
+            "正文 [@doe2020]，见 @fig:x 与 [注]{.sidenote}。\n\n"
+            "```mermaid\ngraph TD; A-->B\n```\n\n"
+            "```fen\n8/8/8/8/8/8/8/8\n```\n",
+            encoding="utf-8",
+        )
+        code, out, err = run_cli(["detect", str(md)])
+        self.assertEqual(code, 0, err)
+        features = json.loads(out)["features"]
+        for key in ("citation", "cross_reference", "sidenote", "mermaid", "diagram", "chess"):
+            self.assertTrue(features[key], key)
 
     def test_doctor_passes(self):
         code, out, err = run_cli(["doctor"])
@@ -317,6 +332,14 @@ class CitationTests(unittest.TestCase):
         )
         self.assertEqual(code, 1)
         self.assertIn("nope.bib", err)
+
+    def test_citation_without_bibliography_fails_with_a_hint(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n正文 [@doe2020]。\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("bibliography", err)
+        self.assertIn("doe2020", err)
 
     def test_unknown_citation_key_fails(self):
         code, _, err = self.build_doc(

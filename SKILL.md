@@ -21,7 +21,7 @@ python scripts/build_pdf.py detect <输入文件...>
 
 ## 2. Clarify：只问会改变成品的选择
 
-一轮问完，最多 6 个问题；每题给 2–4 个选项、一个**推荐值**和一句理由；末尾附「全部按推荐」。
+一轮问完，最多 8 个问题；每题给 2–4 个选项、一个**推荐值**和一句理由；末尾附「全部按推荐」。
 
 | # | 问题 | 何时问 | 推荐值 |
 |---|------|--------|--------|
@@ -31,6 +31,8 @@ python scripts/build_pdf.py detect <输入文件...>
 | 4 | 封面元信息 | 要做封面但缺报告人/机构/日期 | 从 frontmatter 补；缺的留空，交付时说明 |
 | 5 | 配色 | 用户没提 | `teal`；正式场合用 `mono` |
 | 6 | 代码行号 | 源文件含代码块且用户没提 | 不加行号（`code.line-numbers=false`）；要引用具体行时再加 |
+| 7 | 引文样式 | `detect` 报 `citation: true`，或用户提到参考文献 | 按语言默认：中文 GB/T 7714、英文 IEEE、`article` 用 APA |
+| 8 | 边注 | 脚注较多，或 Kind 是 `textbook` | `textbook` 用页边；其余保持页脚 |
 
 字号、行距、页边距、目录深度、代码主题留到第 6 步，第一版一律用 Kind 默认值。
 
@@ -81,14 +83,14 @@ python scripts/build_pdf.py build book.md ch01.md ch02.md
 
 用读图能力打开构建打印出的 PNG。默认抽文档中部的一页正文；出现 warning（缺字体、内容溢出）时自动多抽封面和前几页。
 
-看三件事：字体是否成方块、表格/代码是否溢出、封面与目录是否错位。
+看三件事：字体是否成方块、表格/代码是否溢出、封面与目录是否错位。文档里有**棋谱、图表、边注、行号**时，对应那页要单独看一眼：棋盘有没有缺子、图表是否被裁、边注有没有压住正文。
 
 ```bash
 python scripts/build_pdf.py build doc.md --check all   # 全量逐页
 python scripts/build_pdf.py build doc.typ              # 只查已有 .typ
 ```
 
-**完成判据**：你看过至少一张抽页，并能说出上面三件事各自的状态。
+**完成判据**：你看过至少一张抽页，并能说出上面三件事各自的状态；文档里有棋谱、图表、边注或行号时，对应那页也看过。
 
 ## 6. 调整
 
@@ -115,6 +117,20 @@ python scripts/build_pdf.py build doc.md --set heading.size-1=18pt --set color.p
 
 每种 Kind 的封面、目录、编号、页眉细节在 [references/kinds.md](references/kinds.md)。
 
+## 内容速查
+
+正文里能写什么，按「想排成什么」查：
+
+| 想排 | 写法 | 细节 |
+|------|------|------|
+| 引文 + 参考文献 | frontmatter `bibliography: refs.bib`，正文 `[@key]` | [citations.md](references/citations.md) |
+| 交叉引用 | `{#fig:x}` + `@fig:x`；公式 `\label{eq:x}` + `\eqref{}` / `@eq:` | [authoring.md](references/authoring.md) |
+| 边注 | `[文字]{.sidenote}` 或 `::: {.sidenote}` | [authoring.md](references/authoring.md) |
+| 代码行号 | `--set code.line-numbers=true`，或单块 `{.line-numbers}` | [authoring.md](references/authoring.md) |
+| 图表 | ```` ```dot ```` / ```` ```mermaid ```` 围栏 | [authoring.md](references/authoring.md) |
+| 公式编号 | 自动（book/article）或 `--set math.numbering=(1)` | [authoring.md](references/authoring.md) |
+| 棋谱 | ```` ```fen ```` / ```` ```pgn ```` / ```` ```notation ```` | [chess.md](references/chess.md) |
+
 ## 参考
 
 按需读取，不必预先加载：
@@ -122,6 +138,7 @@ python scripts/build_pdf.py build doc.md --set heading.size-1=18pt --set color.p
 - [references/kinds.md](references/kinds.md) — 七种 Kind 的版式细节、frontmatter 示例、默认值
 - [references/style-knobs.md](references/style-knobs.md) — 全部旋钮、取值格式、各 Kind 覆盖表
 - [references/authoring.md](references/authoring.md) — Markdown 方言：数学、语义块、信函字段、多文件、图片
+- [references/citations.md](references/citations.md) — 引文与书目：声明、样式、`.csl`、与交叉引用的分工
 - [references/chess.md](references/chess.md) — 棋谱：fen / pgn / notation 围栏与选项
 - [references/troubleshooting.md](references/troubleshooting.md) — 报错与版式问题的处理
 - [INSTALL.md](INSTALL.md) — 安装（分「用户」与「Agent」两部分）

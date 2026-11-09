@@ -318,6 +318,9 @@ CODE_THEMES = {"default", "none"}
 
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
+# A `@key` left in the generated body is a citation; emails (`a@b.com`) and
+# already-converted references (`#ref(<…>)`) do not match.
+CITATION_RE = re.compile(r"(?<![\w@])@([A-Za-z][\w:.\-]*)")
 
 # Margin notes, both written as `{.sidenote}`: inline on a span, block on a div.
 INLINE_NOTE_RE = re.compile(r"\[([^\]]*)\]\{[^}]*\.sidenote[^}]*\}")
@@ -1377,6 +1380,10 @@ def letter_snippet(frontmatter: dict) -> str:
 # Rendering and self-check
 # --------------------------------------------------------------------------- #
 def page_count(typ: Path, root: Path | None = None) -> int:
+    # An existing .typ may reference assets outside its own directory; the
+    # recorded root is what makes those paths resolve.
+    if root is None:
+        root = root_from_typ(typ)
     proc = run(["typst", "eval", *typst_args(root), "query(<pdfgen-pages>)", "--in", str(typ)],
                check=False)
     if proc.returncode != 0 or not proc.stdout.strip():
@@ -1500,6 +1507,13 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
                 "正文引用了公式（@eq: / \\eqref / \\ref），但公式没有编号，Typst 无法生成引用。\n"
                 "用 --set math.numbering=(1) 打开公式编号，或在 doc.yml 里设 math.numbering。"
             )
+        if not style["cite"]["enabled"]:
+            citation = CITATION_RE.search(raw_body)
+            if citation:
+                raise SpecError(
+                    f"正文有引文（@{citation.group(1)}），但没有参考文献表可指向它。\n"
+                    "在 frontmatter 写 bibliography: refs.bib，或删掉这些引用。"
+                )
         images = local_images(raw_body, first.parent)
         csl_path = resolve_csl(str(style["cite"]["style"]), first.parent)
         assets = images + [p for p in (bib_path, csl_path) if p]
@@ -1606,6 +1620,11 @@ def cmd_detect(args) -> int:
                          for _, _, _, info, _ in iter_fences(joined)),
             "diagram": any(parse_fence_info(info)[0] in DIAGRAM_RENDERERS
                            for _, _, _, info, _ in iter_fences(joined)),
+            "mermaid": any(parse_fence_info(info)[0] == "mermaid"
+                           for _, _, _, info, _ in iter_fences(joined)),
+            "citation": bool(re.search(r"\[\s*@", joined)),
+            "cross_reference": bool(re.search(r"@(fig|tab|eq|sec):|\\(eq)?ref\{", joined)),
+            "sidenote": bool(re.search(r"\{\.[^}]*sidenote", prose_only(joined))),
         },
     }
     print(json.dumps(info, ensure_ascii=False, indent=2))
@@ -1737,6 +1756,10 @@ def cmd_doctor(args) -> int:
             print(f"[ok  ] 图表渲染器 {binary}（{lang}）")
         else:
             print(f"[warn] 缺少 {binary}（可选：{hint}）；{lang} 图按源码排出")
+    # Kept next to the working directory: the sandbox lets us write into a
+    # redirected temp dir but may refuse to clean it up.  The trade-off is that
+    # the project dir must be writable, and a crash can leave litter behind
+    # (`.gitignore` covers the prefix).
     tmp = Path(tempfile.mkdtemp(prefix="pdfgen-doctor-", dir=Path.cwd()))
     try:
         if VENDOR_PACKAGES.exists():
