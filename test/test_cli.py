@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import base64
 import io
+import os
 import shutil
 import sys
 import tempfile
@@ -121,6 +122,7 @@ class BuildTests(unittest.TestCase):
         code, out, err = run_cli(["doctor"])
         self.assertEqual(code, 0, err)
         self.assertIn("模板自检", out)
+        self.assertIn("mmdc", out)
 
     def test_frontmatter_kind_beats_doc_spec(self):
         spec = self.tmp / "force-report.doc.yml"
@@ -614,6 +616,191 @@ class CodeLineNumberTests(unittest.TestCase):
         typ = self.typ()
         # Wrapping must happen before the Div is flattened, i.e. inside #notice.
         self.assertLess(typ.index("#notice["), typ.index("#numbered-code["))
+
+
+DOT_DIAGRAM = "digraph G {\n  rankdir=LR;\n  A -> B;\n}\n"
+
+
+@unittest.skipUnless(HAVE_DEPS, "需要 typst 与 pandoc")
+class DiagramTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-test-", dir=str(ROOT)))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def build_doc(self, body: str, *extra: str):
+        md = self.tmp / "doc.md"
+        md.write_text(body, encoding="utf-8")
+        return run_cli(["build", str(md), "-o", str(self.tmp / "doc.pdf"),
+                        "--check", "none", *extra])
+
+    def typ(self) -> str:
+        return (self.tmp / "doc.typ").read_text(encoding="utf-8")
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_dot_fence_becomes_a_captioned_figure(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f'```dot {{caption="数据流" width=60%}}\n{DOT_DIAGRAM}```\n'
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("#figure(image(", typ)
+        self.assertIn('caption: [#text("数据流")]', typ)
+        self.assertIn("width: 60%", typ)
+        self.assertTrue(list((self.tmp / ".pdfgen" / "diagrams").glob("*.svg")))
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_diagram_label_becomes_a_figure_label(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f"```dot {{#fig:flow}}\n{DOT_DIAGRAM}```\n\n见图 @fig:flow。\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("<fig:flow>", typ)
+        self.assertIn("#ref(<fig:flow>)", typ)
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_rendered_svg_is_cached_between_builds(self):
+        body = f"---\ntitle: 测试\n---\n\n```dot\n{DOT_DIAGRAM}```\n"
+        self.assertEqual(self.build_doc(body)[0], 0)
+        svg = next((self.tmp / ".pdfgen" / "diagrams").glob("*.svg"))
+        stamp = svg.stat().st_mtime_ns
+        self.assertEqual(self.build_doc(body)[0], 0)
+        self.assertEqual(svg.stat().st_mtime_ns, stamp)
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_broken_diagram_fails_with_a_pointer(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n```dot\ndigraph { -> }\n```\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("渲染失败", err)
+        self.assertIn("doc.md:", err)
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_diagram_nested_in_a_list_is_still_found(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            '- 列表项：\n\n  ```dot {caption="列表里的图"}\n  digraph { A -> B; }\n  ```\n'
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('caption: [#text("列表里的图")]', self.typ())
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_escaped_quotes_in_caption_survive(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            '```dot {caption="他说 \\"你好\\" 完了"}\n'
+            f"{DOT_DIAGRAM}```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('caption: [#text("他说 \\"你好\\" 完了")]', self.typ())
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_indented_sample_does_not_shift_the_index(self):
+        sample = "    ```dot\n    digraph { A -> B; }\n    ```\n"
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            + sample
+            + '\n```dot {caption="真图"}\ndigraph { C -> D; }\n```\n'
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn('caption: [#text("真图")]', typ)
+        self.assertEqual(typ.count("#figure(image("), 1)
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_two_identical_diagrams_with_different_labels_stay_distinct(self):
+        body = (
+            "---\ntitle: 测试\n---\n\n"
+            f"```dot {{#fig:a}}\n{DOT_DIAGRAM}```\n\n"
+            f"```dot {{#fig:b}}\n{DOT_DIAGRAM}```\n"
+        )
+        code, _, err = self.build_doc(body)
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("<fig:a>", typ)
+        self.assertIn("<fig:b>", typ)
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_a_code_sample_of_dot_source_is_not_converted(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f"```text\n{DOT_DIAGRAM}```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("#figure(image(", self.typ())
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_tilde_fences_are_recognised(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f'~~~dot {{caption="波浪围栏"}}\n{DOT_DIAGRAM}~~~\n'
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('caption: [#text("波浪围栏")]', self.typ())
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_unknown_diagram_option_fails(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            f"```dot {{widht=60%}}\n{DOT_DIAGRAM}```\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("widht", err)
+        self.assertIn("caption", err)
+
+    def test_mermaid_renders_through_a_windows_cmd_shim(self):
+        shim_dir = self.tmp / "bin"
+        shim_dir.mkdir()
+        script = self.tmp / "fake_mmdc.py"
+        script.write_text(
+            "import pathlib, sys\n"
+            "args = sys.argv[1:]\n"
+            "out = args[args.index('-o') + 1]\n"
+            "pathlib.Path(out).write_text(\n"
+            "    '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\">'\n"
+            "    '</svg>', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        (shim_dir / "mmdc.cmd").write_text(
+            f'@echo off\r\n"{sys.executable}" "{script}" %*\r\n', encoding="utf-8"
+        )
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(shim_dir) + os.pathsep + old_path
+        try:
+            code, _, err = self.build_doc(
+                "---\ntitle: 测试\n---\n\n```mermaid\ngraph TD; A-->B\n```\n"
+            )
+        finally:
+            os.environ["PATH"] = old_path
+        self.assertEqual(code, 0, err)
+        self.assertIn("#figure(image(", self.typ())
+
+    @unittest.skipUnless(not shutil.which("mmdc"), "本机装了 mmdc 就测不到降级")
+    def test_degraded_diagram_keeps_caption_and_label(self):
+        code, out, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            '```mermaid {#fig:flow caption="Mermaid 示例"}\n'
+            "graph TD; A-->B;\n```\n\n见 @fig:flow。\n"
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn('caption: [#text("Mermaid 示例")]', typ)
+        self.assertIn("<fig:flow>", typ)
+        self.assertIn("#ref(<fig:flow>)", typ)
+
+    @unittest.skipUnless(not shutil.which("mmdc"), "本机装了 mmdc 就测不到降级")
+    def test_mermaid_without_renderer_falls_back_to_source(self):
+        code, out, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n```mermaid\ngraph TD; A-->B\n```\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("mmdc", out + err)
+        self.assertIn("```mermaid", self.typ())
 
 
 if __name__ == "__main__":

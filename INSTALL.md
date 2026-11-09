@@ -111,6 +111,17 @@ rm -rf ~/.dsh/skills/pdf-generation             # 卸载
 
 注意许可：棋子 SVG 是 GPL-2.0-or-later，该目录单独挂 `LICENSE` 与 `NOTICE.md`，仓库其余部分仍是 MIT。
 
+### 附：图表渲染器（可选）
+
+`dot` / `mermaid` 围栏要出图，才需要对应的渲染器：
+
+| 语言 | 工具 | 安装 |
+|------|------|------|
+| `dot` | Graphviz | `winget install Graphviz.Graphviz` / `brew install graphviz` / `apt install graphviz` |
+| `mermaid` | mermaid-cli | `npm i -g @mermaid-js/mermaid-cli` |
+
+没装也能构建：给一条警告，对应的图按源码代码块排出。`doctor` 会分别报告两者的可用性。装了 `mmdc` 的机器上，构建会在源文件旁的 `.pdfgen/diagrams/` 缓存 SVG，同样的图不会重复渲染。
+
 ---
 
 ## 第二部分：给 Agent

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -241,6 +242,41 @@ class SidenoteScanTests(unittest.TestCase):
         text = "正文[^1]。\n\n[^1]: " + "很长的脚注" * 60 + "\n"
         self.assertEqual(bp.inspect_sidenotes(text, include_footnotes=False)[1], [])
         self.assertEqual(len(bp.inspect_sidenotes(text, include_footnotes=True)[1]), 1)
+
+
+class DiagramScanTests(unittest.TestCase):
+    def test_parse_fence_info(self):
+        self.assertEqual(
+            bp.parse_fence_info('dot {caption="数据流" width=60%}'),
+            ("dot", {"caption": "数据流", "width": "60%"}),
+        )
+        self.assertEqual(bp.parse_fence_info("mermaid"), ("mermaid", {}))
+        lang, attrs = bp.parse_fence_info('dot {#fig:a caption="x"}')
+        self.assertEqual(lang, "dot")
+        self.assertEqual(attrs["id"], "fig:a")
+        self.assertEqual(attrs["caption"], "x")
+
+    def test_iter_fences_handles_tilde_fences_and_indentation(self):
+        text = "说明\n\n  ~~~dot\n  digraph { A -> B; }\n  ~~~\n\n结尾\n"
+        fences = list(bp.iter_fences(text))
+        self.assertEqual(len(fences), 1)
+        start, end, indent, info, body = fences[0]
+        self.assertEqual((start, end), (3, 5))
+        self.assertEqual((indent, info.strip()), (2, "dot"))
+        self.assertEqual(body, ["digraph { A -> B; }"])
+        self.assertNotIn("digraph", bp.prose_only(text))
+
+    def test_line_numbers_reported_for_diagram_blocks(self):
+        text = "第一段\n\n```dot\n digraph { A -> B; }\n```\n"
+        blocks = bp.find_diagram_blocks(text)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["line"], 3)
+
+    @unittest.skipUnless(shutil.which("dot"), "需要 graphviz")
+    def test_dot_argv_asks_for_svg(self):
+        argv = bp.renderer_argv("dot", Path("a.dot"), Path("a.svg"))
+        self.assertIn("-Tsvg", argv)
+        self.assertIn("a.dot", " ".join(argv))
 
 
 class EmissionTests(unittest.TestCase):

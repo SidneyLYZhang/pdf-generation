@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -35,6 +36,8 @@ LUA_FILTER = SKILL_ROOT / "filters" / "semantic.lua"
 # Runs before semantic.lua: it rewrites notes and code blocks, which must happen
 # before fenced Divs are flattened into raw Typst.
 FEATURE_FILTER = SKILL_ROOT / "filters" / "features.lua"
+# No-op unless the build passed a `pdfgen-diagrams` metadata file.
+DIAGRAM_FILTER = SKILL_ROOT / "filters" / "diagrams.lua"
 # Vendored Typst Universe packages (ADR-0005).  Typst resolves `@preview/...`
 # imports here when `--package-path` points at it, so no network is needed.
 VENDOR_PACKAGES = SKILL_ROOT / "vendor" / "typst-packages"
@@ -323,17 +326,11 @@ NOTE_GAP_CHARS = 80
 
 def prose_only(text: str) -> str:
     """Drop fenced code blocks: a syntax example must not look like the syntax."""
-    lines, fence = [], None
-    for line in text.splitlines():
-        stripped = line.lstrip()
-        if fence is None:
-            if stripped.startswith(("```", "~~~")):
-                fence = stripped[:3]
-                continue
-            lines.append(line)
-        elif stripped.startswith(fence):
-            fence = None
-    return "\n".join(lines)
+    lines = text.splitlines()
+    dropped: set[int] = set()
+    for start, end, _, _, _ in iter_fences(text):
+        dropped.update(range(start, end + 1))
+    return "\n".join(line for number, line in enumerate(lines, 1) if number not in dropped)
 
 
 def inspect_sidenotes(text: str, include_footnotes: bool = False) -> tuple[bool, list[int], int]:
@@ -365,6 +362,190 @@ def inspect_sidenotes(text: str, include_footnotes: bool = False) -> tuple[bool,
     )
     overlong = [length for length in lengths if length > LONG_NOTE_CHARS]
     return bool(inline or blocks), overlong, crowded
+
+# Diagrams: a `mermaid` or `dot` fence is rendered to SVG at build time and
+# turned into a normal figure, so the float knobs and @fig: references apply.
+# The rendered paths reach pandoc as a metadata file; filters/diagrams.lua looks
+# blocks up by their position, so two identical diagrams stay distinct.
+DIAGRAM_RENDERERS = {
+    "mermaid": ("mmdc", "npm i -g @mermaid-js/mermaid-cli"),
+    "dot": ("dot", "winget install Graphviz.Graphviz"),
+}
+DIAGRAM_ATTRS = ("caption", "width", "id")
+FENCE_OPEN_RE = re.compile(r"^(?P<fence>`{3,}|~{3,})[ \t]*(?P<info>.*)$")
+ATTR_PAIR_RE = re.compile(r'([A-Za-z][\w-]*)=(?:"((?:[^"\\]|\\.)*)"|(\S+))')
+LENGTH_ATTR_RE = re.compile(r"^\d+(\.\d+)?(pt|cm|mm|in|em|%)$")
+LABEL_RE = re.compile(r"^[A-Za-z0-9_:.\-]+$")
+
+
+def iter_fences(text: str):
+    """Yield (start_line, end_line, indent, info, body_lines) for each fenced block."""
+    fence, info, body, start, indent = None, "", [], 0, 0
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if fence is None:
+            match = FENCE_OPEN_RE.match(stripped)
+            if match:
+                indent = len(line) - len(line.lstrip())
+                # Four or more spaces means an indented code block, not a
+                # fence: pandoc would render the fence text literally.
+                if indent <= 3:
+                    fence, info, body, start = match.group("fence"), match.group("info"), [], number
+            continue
+        if stripped.startswith(fence) and set(stripped) == {fence[0]}:
+            yield start, number, indent, info, body
+            fence = None
+            continue
+        # Pandoc strips the fence's own indentation from the code, so the
+        # lookup key has to be built from the same text.
+        body.append(line[indent:] if line[:indent].strip() == "" else line.lstrip())
+
+
+def parse_fence_info(info: str) -> tuple[str, dict[str, str]]:
+    """`dot {caption="接口" width=60%}` -> ("dot", {...})."""
+    info = info.strip()
+    if not info:
+        return "", {}
+    if "{" in info:
+        lang, _, rest = info.partition("{")
+        attrs_text = rest.rsplit("}", 1)[0]
+    else:
+        lang, attrs_text = info, ""
+    attrs: dict[str, str] = {}
+    for match in ATTR_PAIR_RE.finditer(attrs_text):
+        quoted = match.group(2)
+        if quoted is not None:
+            quoted = quoted.replace('\\"', '"').replace("\\\\", "\\")
+        attrs[match.group(1)] = quoted if quoted is not None else match.group(3)
+    for match in re.finditer(r"#([A-Za-z0-9_:.\-]+)", attrs_text):
+        attrs["id"] = match.group(1)
+    return lang.strip().lower(), attrs
+
+
+def find_diagram_blocks(text: str) -> list[dict]:
+    """Diagram fences in `text`, with the line their fence starts on."""
+    blocks: list[dict] = []
+    for start, _, _, info, body in iter_fences(text):
+        lang, attrs = parse_fence_info(info)
+        if lang not in DIAGRAM_RENDERERS:
+            continue
+        unknown = sorted(set(attrs) - set(DIAGRAM_ATTRS))
+        if unknown:
+            raise SpecError(
+                f"第 {start} 行的 {lang} 图有不认识的选项：{', '.join(unknown)}；"
+                f"可用：{', '.join(DIAGRAM_ATTRS)}"
+            )
+        blocks.append({"lang": lang, "attrs": attrs, "text": "\n".join(body), "line": start})
+    return blocks
+
+
+def renderer_command(lang: str) -> list[str] | None:
+    """The command that renders `lang`, or None when the tool is not installed."""
+    binary = DIAGRAM_RENDERERS[lang][0]
+    resolved = shutil.which(binary)
+    if not resolved:
+        return None
+    # npm installs `mmdc.cmd` on Windows, which CreateProcess cannot start直接.
+    if resolved.lower().endswith((".cmd", ".bat")):
+        return ["cmd", "/c", resolved]
+    return [resolved]
+
+
+def renderer_argv(lang: str, source: Path, dest: Path) -> list[str] | None:
+    """The full command for one render, or None when the tool is not installed."""
+    command = renderer_command(lang)
+    if command is None:
+        return None
+    if lang == "mermaid":
+        return command + ["-i", str(source), "-o", str(dest)]
+    return command + ["-Tsvg", str(source), "-o", str(dest)]
+
+
+def render_diagram(lang: str, text: str, dest: Path) -> None:
+    source = dest.with_suffix(".mmd" if lang == "mermaid" else ".dot")
+    argv = renderer_argv(lang, source, dest)
+    if argv is None:
+        raise SpecError(f"找不到 {DIAGRAM_RENDERERS[lang][0]}")
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        raise SpecError(f"无法写图表缓存 {dest.parent}（{exc}）；源目录需要可写") from None
+    try:
+        proc = run(argv, check=False)
+    except OSError as exc:
+        raise SpecError(f"{lang} 渲染器无法启动（{argv[0]}）：{exc}") from None
+    if proc.returncode != 0 or not dest.exists():
+        detail = (proc.stderr or proc.stdout).strip() or "没有输出文件"
+        raise SpecError(f"{lang} 图渲染失败：{detail}")
+    source.unlink(missing_ok=True)
+
+
+def diagram_svg_path(lang: str, text: str, cache_dir: Path) -> Path:
+    digest = hashlib.sha1(f"{lang}\n{text}".encode("utf-8")).hexdigest()[:16]
+    return cache_dir / f"{digest}.svg"
+
+
+def prepare_diagrams(inputs: list[Path], base: Path) -> tuple[Path | None, list[str]]:
+    """Render every diagram fence to SVG and return (metadata path, warnings)."""
+    cache_dir = base / ".pdfgen" / "diagrams"
+    entries: dict[str, dict] = {}
+    warnings: list[str] = []
+    missing: set[str] = set()
+    index = 0
+    for path in inputs:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for block in find_diagram_blocks(text):
+            index += 1
+            attrs = block["attrs"]
+            command = renderer_command(block["lang"])
+            if command is None:
+                missing.add(block["lang"])
+                if attrs.get("caption") or attrs.get("id"):
+                    # No renderer: keep the figure (numbering, caption, @fig:
+                    # references) and show the source inside it.
+                    entries[str(index)] = {
+                        "caption": attrs.get("caption", ""),
+                        "id": attrs.get("id", ""),
+                    }
+                continue
+            target = diagram_svg_path(block["lang"], block["text"], cache_dir)
+            if not target.exists():
+                try:
+                    render_diagram(block["lang"], block["text"], target)
+                except SpecError as exc:
+                    raise SpecError(f"{path}:{block['line']} {exc}") from None
+            width = attrs.get("width", "")
+            if width and not LENGTH_ATTR_RE.match(width):
+                raise SpecError(
+                    f"{path}:{block['line']} 图宽 {width!r} 不是长度（如 60% / 10cm）"
+                )
+            label = attrs.get("id", "")
+            if label and not LABEL_RE.match(label):
+                raise SpecError(f"{path}:{block['line']} 图标签 {label!r} 含非法字符")
+            entries[str(index)] = {
+                "path": f".pdfgen/diagrams/{target.name}",
+                "caption": attrs.get("caption", ""),
+                "width": width,
+                "id": label,
+            }
+    for lang in sorted(missing):
+        binary, hint = DIAGRAM_RENDERERS[lang]
+        warnings.append(f"未安装 {binary}，{lang} 图按源码排出（{hint}）")
+    if not entries:
+        return None, warnings
+    metadata = cache_dir.parent / "diagrams.json"
+    try:
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        payload = {key: entry for key, entry in entries.items() if any(entry.values())}
+        metadata.write_text(
+            json.dumps({"pdfgen-diagrams": payload}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise SpecError(f"无法写 {metadata}（{exc}）；源目录需要可写") from None
+    return metadata, warnings
+
 
 FONT_STACKS = {
     "zh": {
@@ -848,7 +1029,8 @@ def pandoc_meta(path: Path, from_fmt: str) -> str:
 
 
 def body_typst(inputs: list[Path], from_fmt: str, kind: str, *,
-               note_style: str = "footnote", code_lines: bool = False) -> str:
+               note_style: str = "footnote", code_lines: bool = False,
+               diagram_metadata: Path | None = None) -> str:
     need("pandoc", "安装：winget install JohnMacFarlane.Pandoc")
     cmd = [
         "pandoc", "-f", from_fmt, "-t", "typst",
@@ -856,7 +1038,9 @@ def body_typst(inputs: list[Path], from_fmt: str, kind: str, *,
         f"--metadata=pdfgen-note-style:{note_style}",
         f"--metadata=pdfgen-code-lines:{'yes' if code_lines else 'no'}",
     ]
-    for lua_filter in (FEATURE_FILTER, LUA_FILTER):
+    if diagram_metadata is not None:
+        cmd.append(f"--metadata-file={diagram_metadata}")
+    for lua_filter in (DIAGRAM_FILTER, FEATURE_FILTER, LUA_FILTER):
         if not lua_filter.exists():
             raise SpecError(f"缺少 Lua filter {lua_filter}（技能目录不完整，重新安装）")
         cmd += [f"--lua-filter={lua_filter}"]
@@ -1199,12 +1383,15 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
     if keep_typ and typ_path.exists():
         body_note = "复用已有 .typ"
         root = root_from_typ(typ_path)
+        diagram_warnings: list[str] = []
     else:
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
+        diagram_filter, diagram_warnings = prepare_diagrams(inputs, first.parent)
         raw_body = body_typst(inputs, from_fmt, str(chosen),
                               note_style=str(style["note"]["style"]),
-                              code_lines=bool(style["code"]["line-numbers"]))
+                              code_lines=bool(style["code"]["line-numbers"]),
+                              diagram_metadata=diagram_filter)
         if "#ref(<eq:" in raw_body and style["math"]["numbering"] == "none":
             raise SpecError(
                 "正文引用了公式（@eq:），但公式没有编号，Typst 无法生成引用。\n"
@@ -1226,6 +1413,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
 
     proc = run(["typst", "compile", *typst_args(root), str(typ_path), str(out_pdf)], check=False)
     warnings = parse_warnings(proc.stderr)
+    warnings.extend(diagram_warnings)
     if proc.returncode != 0:
         raise SpecError(f"Typst 编译失败：\n{proc.stderr.strip()}")
     for length in long_notes:
@@ -1437,6 +1625,11 @@ def cmd_doctor(args) -> int:
     for font in ("Noto Serif SC", "Noto Sans SC"):
         mark = "ok  " if font in fonts else "warn"
         print(f"[{mark}] 中文字体 {font}（缺失时中文会用后备字体）")
+    for lang, (binary, hint) in DIAGRAM_RENDERERS.items():
+        if shutil.which(binary):
+            print(f"[ok  ] 图表渲染器 {binary}（{lang}）")
+        else:
+            print(f"[warn] 缺少 {binary}（可选：{hint}）；{lang} 图按源码排出")
     tmp = Path(tempfile.mkdtemp(prefix="pdfgen-doctor-", dir=Path.cwd()))
     try:
         if VENDOR_PACKAGES.exists():

@@ -93,6 +93,22 @@ pandoc 负责把 LaTeX 翻成 Typst 数学：`\frac{a}{b}` → `a/b`，`\alpha` 
 
 `title` 属性可选，显示在标签后面。不认识的 class 会渲染成普通块，内容保留。
 
+## 图表（mermaid / graphviz）
+
+`mermaid` 与 `dot`（Graphviz）围栏在构建时渲染成 SVG，变成带编号的图：
+
+````markdown
+```dot {#fig:flow caption="数据采集流程" width=70%}
+digraph G { rankdir=LR; 采集 -> 清洗 -> 入库; }
+```
+````
+
+- 选项写在围栏的 `{…}` 里：`caption`（题注）、`width`（`60%` / `10cm`）、`#fig:xxx`（标签，供 `@fig:` 引用）。
+- 渲染结果按内容 hash 缓存在源文件旁的 `.pdfgen/diagrams/`，同样的图不会重复渲染。
+- 没装渲染器时构建照常成功：给一条警告，图按源码排出；若写了 `caption` 或 `#fig:`，仍会包成 figure（源码在图内），编号和 `@fig:` 引用照常成立。`dot` 来自 Graphviz，`mmdc` 来自 `npm i -g @mermaid-js/mermaid-cli`。
+- 渲染失败（语法错）会终止构建，报错里带文件和围栏起始行。
+- 图与普通图片共用 `float.*` 旋钮（题注位置、编号格式、默认宽度）。
+
 ## 图片
 
 ```markdown
