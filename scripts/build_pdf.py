@@ -120,6 +120,11 @@ KNOBS: dict[str, tuple[str, object]] = {
     "code.header": ("bool", True),
     # math -------------------------------------------------------------------
     "math.numbering": ("numbering", "none"),
+    # margin notes -----------------------------------------------------------
+    "note.style": ("notestyle", "footnote"),
+    "note.width": ("length", "4.2cm"),
+    "note.gap": ("length", "12pt"),
+    "note.size": ("length", "8pt"),
     # citations --------------------------------------------------------------
     "cite.enabled": ("bool", "auto"),
     "cite.style": ("str", "auto"),
@@ -267,6 +272,7 @@ PRESETS: dict[str, dict[str, object]] = {
         "text.first-line-indent": "2em",
         "text.size": "11pt",
         "semantic.numbering": "1",
+        "note.style": "margin",
         "novel.dropcap": False,
         "novel.chapter-prefix": False,
     },
@@ -300,6 +306,61 @@ CODE_THEMES = {"default", "none"}
 
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
+
+# Margin notes, both written as `{.sidenote}`: inline on a span, block on a div.
+INLINE_NOTE_RE = re.compile(r"\[([^\]]*)\]\{[^}]*\.sidenote[^}]*\}")
+BLOCK_NOTE_RE = re.compile(r":::+\s*\{[^}]*\.sidenote[^}]*\}[^\n]*\n(.*?):::", re.S)
+FOOTNOTE_DEF_RE = re.compile(r"^\[\^[^\]]+\]:[ \t]*(.+)$", re.M)
+PAGEBREAK_RE = re.compile(r":::\s*pagebreak\s*:::")
+LONG_NOTE_CHARS = 200
+# Rough stand-in for vertical distance: about two notes' worth of body text.
+NOTE_GAP_CHARS = 80
+
+
+def prose_only(text: str) -> str:
+    """Drop fenced code blocks: a syntax example must not look like the syntax."""
+    lines, fence = [], None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if fence is None:
+            if stripped.startswith(("```", "~~~")):
+                fence = stripped[:3]
+                continue
+            lines.append(line)
+        elif stripped.startswith(fence):
+            fence = None
+    return "\n".join(lines)
+
+
+def inspect_sidenotes(text: str, include_footnotes: bool = False) -> tuple[bool, list[int], int]:
+    """What a build must know about margin notes: present, long ones, tight pairs.
+
+    A pair is "tight" when the distance between the end of one note and the start
+    of the next is small: the note's own text moves to the margin, so it must not
+    count as spacing.  Pairs split by an explicit page break can never collide.
+    """
+    prose = prose_only(text)
+    inline = list(INLINE_NOTE_RE.finditer(prose))
+    blocks = list(BLOCK_NOTE_RE.finditer(prose))
+    spans = [(match.start(), match.end()) for match in inline + blocks]
+    lengths = [len(match.group(1)) for match in inline]
+    lengths += [len(match.group(1).strip()) for match in blocks]
+
+    if include_footnotes:
+        footnotes = list(FOOTNOTE_DEF_RE.finditer(prose))
+        spans += [(match.start(), match.end()) for match in footnotes]
+        lengths += [len(match.group(1)) for match in footnotes]
+
+    spans.sort()
+    breaks = [match.start() for match in PAGEBREAK_RE.finditer(prose)]
+    crowded = sum(
+        1
+        for (_, prev_end), (next_start, _) in zip(spans, spans[1:])
+        if next_start - prev_end < NOTE_GAP_CHARS
+        and not any(prev_end < b < next_start for b in breaks)
+    )
+    overlong = [length for length in lengths if length > LONG_NOTE_CHARS]
+    return bool(inline or blocks), overlong, crowded
 
 FONT_STACKS = {
     "zh": {
@@ -480,6 +541,7 @@ ENUMS: dict[str, tuple[set[str], str]] = {
     "header": (HEADERS, "页眉模式"),
     "captionpos": (CAPTION_POS, "题注位置"),
     "codetheme": (CODE_THEMES, "代码主题"),
+    "notestyle": ({"footnote", "margin"}, "边注模式"),
 }
 
 
@@ -547,7 +609,8 @@ def coerce(path: str, value: object) -> object:
 
 
 def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
-                  notes: list[str] | None = None, has_bibliography: bool = False) -> dict:
+                  notes: list[str] | None = None, has_bibliography: bool = False,
+                  has_sidenotes: bool = False) -> dict:
     flat = {path: default for path, (_, default) in KNOBS.items()}
     flat["kind"] = kind
 
@@ -642,6 +705,15 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
             flat["cite.style"] = "gb-7714-2015-numeric" if chinese else "ieee"
     if flat["cite.title"] == "auto":
         flat["cite.title"] = "参考文献" if chinese else "References"
+    # An explicit `[text]{.sidenote}` is a request for margin space, so it turns
+    # margin mode on — unless the author set `note.style` on purpose, in which
+    # case the precedence rule in style-knobs.md wins and notes fall back to
+    # footnotes.
+    note_style_is_explicit = "note.style" in entries or any(
+        raw.partition("=")[0].strip() == "note.style" for raw in sets
+    )
+    if has_sidenotes and not note_style_is_explicit:
+        flat["note.style"] = "margin"
 
     # Typst 0.15 places the next paragraph half a line too high when the
     # paragraph spacing drops below ~4.5pt, which makes lines collide.
@@ -771,9 +843,13 @@ def pandoc_meta(path: Path, from_fmt: str) -> str:
     ], from_fmt)
 
 
-def body_typst(inputs: list[Path], from_fmt: str, kind: str) -> str:
+def body_typst(inputs: list[Path], from_fmt: str, kind: str, note_style: str = "footnote") -> str:
     need("pandoc", "安装：winget install JohnMacFarlane.Pandoc")
-    cmd = ["pandoc", "-f", from_fmt, "-t", "typst", f"--metadata=pdfgen-kind:{kind}"]
+    cmd = [
+        "pandoc", "-f", from_fmt, "-t", "typst",
+        f"--metadata=pdfgen-kind:{kind}",
+        f"--metadata=pdfgen-note-style:{note_style}",
+    ]
     if LUA_FILTER.exists():
         cmd += [f"--lua-filter={LUA_FILTER}"]
     cmd += [str(p) for p in inputs]
@@ -1094,11 +1170,19 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
     if chosen not in KINDS:
         raise SpecError(f"未知 Kind {chosen!r}，可选：{', '.join(KINDS)}")
 
-    lang = detect_lang("\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs))
+    source_text = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs)
+    lang = detect_lang(source_text)
     bib_path = resolve_bibliography(fm, first.parent)
+    has_notes, _, _ = inspect_sidenotes(source_text)
     notes: list[str] = []
     style = resolve_style(str(chosen), doc_spec, sets, lang, notes,
-                          has_bibliography=bib_path is not None)
+                          has_bibliography=bib_path is not None,
+                          has_sidenotes=has_notes)
+    # Footnotes only reach the margin when margin mode is on, so they only need
+    # checking then.
+    _, long_notes, crowded = inspect_sidenotes(
+        source_text, include_footnotes=style["note"]["style"] == "margin"
+    )
 
     out_pdf = out_pdf or first.with_suffix(".pdf")
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -1110,7 +1194,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
     else:
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
-        raw_body = body_typst(inputs, from_fmt, str(chosen))
+        raw_body = body_typst(inputs, from_fmt, str(chosen), str(style["note"]["style"]))
         if "#ref(<eq:" in raw_body and style["math"]["numbering"] == "none":
             raise SpecError(
                 "正文引用了公式（@eq:），但公式没有编号，Typst 无法生成引用。\n"
@@ -1134,6 +1218,10 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
     warnings = parse_warnings(proc.stderr)
     if proc.returncode != 0:
         raise SpecError(f"Typst 编译失败：\n{proc.stderr.strip()}")
+    for length in long_notes:
+        warnings.append(f"边注过长（{length} 字），可能压住其它边注或溢出页面；建议拆短或改成脚注")
+    if crowded:
+        warnings.append(f"{crowded} 处相邻边注间距过近，页边可能重叠；建议拉开距离或合并")
 
     total = page_count(typ_path, root)
     samples = pick_samples(total, check_mode) if check_mode != "none" else []
@@ -1246,9 +1334,12 @@ def cmd_style(args) -> int:
         doc_spec = parse_simple_yaml(Path(args.doc).read_text(encoding="utf-8"))
     fm = read_frontmatter(inputs[0])
     kind = args.kind or doc_spec.get("kind") or fm.get("kind") or "report"
-    lang = detect_lang("\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs))
+    source_text = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs)
+    lang = detect_lang(source_text)
+    has_notes, _, _ = inspect_sidenotes(source_text)
     style = resolve_style(str(kind), doc_spec, args.set or [], lang,
-                          has_bibliography=bibliography_field(fm) != "")
+                          has_bibliography=bibliography_field(fm) != "",
+                          has_sidenotes=has_notes)
     text = to_yaml(style)
     if args.write:
         target = Path(args.write)

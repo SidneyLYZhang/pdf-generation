@@ -66,6 +66,10 @@
 | `code.size` | length | `9pt` | 代码字号 |
 | `code.header` | bool | `true` | 代码块顶部语言栏 |
 | `math.numbering` | numbering | `none` | 公式编号格式，如 1 / (1) / none |
+| `note.style` | notestyle | `footnote` | 注释位置：footnote（页脚）/ margin（页边） |
+| `note.width` | length | `4.2cm` | 边注栏宽度 |
+| `note.gap` | length | `12pt` | 边注与正文之间的间距 |
+| `note.size` | length | `8pt` | 边注字号 |
 | `cite.enabled` | bool | `auto` | 是否生成参考文献表；auto = 声明了 `bibliography` 才生成 |
 | `cite.style` | str | `auto` | CSL 样式：内置名（`ieee` / `apa` / `gb-7714-2015-numeric` …）或 `.csl` 路径；auto 按语言与 Kind 取默认 |
 | `cite.title` | str | `auto` | 参考文献标题；auto 按语言取「参考文献 / References」 |
@@ -94,6 +98,7 @@
 | `page.margin` | — | — | `3cm` | — | `2cm` | `2.4cm` | `2.2cm` |
 | `page.paper` | — | — | — | — | `6x9` | `a4` | `a5` |
 | `semantic.numbering` | `none` | — | — | — | — | `1` | — |
+| `note.style` | — | — | — | — | — | `margin` | — |
 | `text.first-line-indent` | `0em` | `0em` | `0em` | `0em` | `2em` | `2em` | `2em` |
 | `text.leading` | — | — | — | `0.6em` | — | — | — |
 | `text.paragraph-spacing` | `1em` | `0.9em` | `1.2em` | `0.5em` | `0.45em` | `0.35em` | `0.45em` |

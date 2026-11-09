@@ -1,3 +1,10 @@
+-- Line 1-3: the AST-level syntax the filter owns.
+--   fenced divs -> semantic blocks / page breaks / margin notes
+--   spans       -> inline margin notes
+--   Cite        -> cross-references (fig:/tab:/eq:/sec:) vs citations
+--   Note        -> margin notes in margin mode
+--   Pandoc      -> kind-specific rewrites (novel drop caps)
+--
 -- Map fenced Divs to the semantic blocks the template provides, and mark the
 -- first paragraph of each chapter so the template can drop a capital.
 -- Anything unknown falls through to pandoc's default `#block[...]`, so the
@@ -22,9 +29,26 @@ local function typst_body(el_blocks, meta)
   return pandoc.write(doc, "typst"):gsub("%s+$", "")
 end
 
+local function typst_inlines(inlines)
+  return typst_body({ pandoc.Plain(inlines) })
+end
+
+-- `[文字]{.sidenote}` and `::: {.sidenote}` are margin notes.  One class name
+-- for both: the element type says which one it is.
+function Span(el)
+  if el.classes:includes("sidenote") then
+    return pandoc.RawInline("typst", "#sidenote[" .. typst_inlines(el.content) .. "]")
+  end
+  return nil
+end
+
 function Div(el)
   if el.classes:includes("pagebreak") then
     return pandoc.RawBlock("typst", "#pagebreak()")
+  end
+
+  if el.classes:includes("sidenote") then
+    return pandoc.RawBlock("typst", "#sidenote-block[\n" .. typst_body(el.content) .. "\n]")
   end
 
   local target = nil
@@ -102,11 +126,24 @@ local function plain_paragraph(para)
   return true
 end
 
+-- In margin mode every footnote becomes a margin note.  The conversion has to
+-- happen here: a `show footnote` rule in the template would replace the inline
+-- marker but Typst would still typeset the entry in the page footer.
+local function note_to_sidenote(note)
+  return pandoc.RawInline("typst", "#sidenote[" .. typst_body(note.content) .. "]")
+end
+
 function Pandoc(doc)
+  local note_style = doc.meta["pdfgen-note-style"]
+  note_style = note_style and pandoc.utils.stringify(note_style) or "footnote"
+  if note_style == "margin" then
+    doc = doc:walk({ Note = note_to_sidenote })
+  end
+
   local kind = doc.meta["pdfgen-kind"]
   kind = kind and pandoc.utils.stringify(kind) or ""
   if kind ~= "novel" then
-    return nil
+    return doc
   end
 
   local out = {}

@@ -161,6 +161,80 @@ class CitationStyleTests(unittest.TestCase):
         self.assertEqual(style["cite"]["title"], "References")
 
 
+class SidenoteStyleTests(unittest.TestCase):
+    def test_default_is_footnote_and_textbook_is_margin(self):
+        self.assertEqual(bp.resolve_style("report", {}, [], "zh")["note"]["style"], "footnote")
+        self.assertEqual(bp.resolve_style("textbook", {}, [], "zh")["note"]["style"], "margin")
+
+    def test_explicit_markers_force_margin_space(self):
+        style = bp.resolve_style("report", {}, [], "zh", has_sidenotes=True)
+        self.assertEqual(style["note"]["style"], "margin")
+
+    def test_explicit_footnote_choice_wins_over_markers(self):
+        style = bp.resolve_style("report", {}, ["note.style=footnote"], "zh", has_sidenotes=True)
+        self.assertEqual(style["note"]["style"], "footnote")
+
+    def test_bad_note_style_rejected(self):
+        with self.assertRaises(bp.SpecError):
+            bp.resolve_style("report", {}, ["note.style=left"], "zh")
+
+    def test_note_knobs_flow_through(self):
+        style = bp.resolve_style(
+            "report", {}, ["note.width=3cm", "note.gap=6pt", "note.size=7pt"], "zh"
+        )
+        self.assertEqual(style["note"]["width"], "3cm")
+        self.assertEqual(style["note"]["gap"], "6pt")
+        self.assertEqual(style["note"]["size"], "7pt")
+
+
+class SidenoteScanTests(unittest.TestCase):
+    def test_no_notes(self):
+        self.assertEqual(bp.inspect_sidenotes("普通正文。"), (False, [], 0))
+
+    def test_inline_note_is_found(self):
+        present, overlong, crowded = bp.inspect_sidenotes("正文[注]{.sidenote}。")
+        self.assertTrue(present)
+        self.assertEqual(overlong, [])
+        self.assertEqual(crowded, 0)
+
+    def test_block_note_is_found(self):
+        present, _, _ = bp.inspect_sidenotes("::: {.sidenote}\n块级注。\n:::\n")
+        self.assertTrue(present)
+
+    def test_fenced_code_is_ignored(self):
+        text = "示例：\n\n```markdown\n正文[注]{.sidenote}。\n```\n\n正文。\n"
+        self.assertEqual(bp.inspect_sidenotes(text), (False, [], 0))
+
+    def test_long_note_is_reported(self):
+        present, overlong, _ = bp.inspect_sidenotes("正文[" + "很长的注" * 80 + "]{.sidenote}。")
+        self.assertTrue(present)
+        self.assertEqual(len(overlong), 1)
+        self.assertGreater(overlong[0], bp.LONG_NOTE_CHARS)
+
+    def test_close_notes_are_counted(self):
+        text = "正文[注一]{.sidenote}。\n\n正文[注二]{.sidenote}。\n"
+        _, _, crowded = bp.inspect_sidenotes(text)
+        self.assertEqual(crowded, 1)
+
+    def test_a_long_first_note_does_not_hide_a_close_pair(self):
+        long_note = "很长的注" * 60
+        text = f"正文[{long_note}]{{.sidenote}}。\n\n正文[注二]{{.sidenote}}。\n"
+        _, _, crowded = bp.inspect_sidenotes(text)
+        self.assertEqual(crowded, 1)
+
+    def test_pagebreak_separates_notes(self):
+        text = (
+            "正文[注一]{.sidenote}。\n\n::: pagebreak\n:::\n\n正文[注二]{.sidenote}。\n"
+        )
+        _, _, crowded = bp.inspect_sidenotes(text)
+        self.assertEqual(crowded, 0)
+
+    def test_footnotes_are_scanned_only_in_margin_mode(self):
+        text = "正文[^1]。\n\n[^1]: " + "很长的脚注" * 60 + "\n"
+        self.assertEqual(bp.inspect_sidenotes(text, include_footnotes=False)[1], [])
+        self.assertEqual(len(bp.inspect_sidenotes(text, include_footnotes=True)[1]), 1)
+
+
 class EmissionTests(unittest.TestCase):
     def test_lengths_and_colours_are_literals(self):
         style = bp.resolve_style("report", {}, ["page.margin=2cm"], "zh")

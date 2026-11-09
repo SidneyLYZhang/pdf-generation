@@ -414,5 +414,101 @@ class CrossReferenceTests(unittest.TestCase):
         self.assertIn("fig:nope", err)
 
 
+@unittest.skipUnless(HAVE_DEPS, "需要 typst 与 pandoc")
+class SidenoteTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-test-", dir=str(ROOT)))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def build_doc(self, body: str, *extra: str):
+        md = self.tmp / "doc.md"
+        md.write_text(body, encoding="utf-8")
+        return run_cli(["build", str(md), "-o", str(self.tmp / "doc.pdf"),
+                        "--check", "none", *extra])
+
+    def typ(self) -> str:
+        return (self.tmp / "doc.typ").read_text(encoding="utf-8")
+
+    def test_inline_sidenote_reaches_the_template(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n正文一段[边注内容]{.sidenote}，后面继续。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#sidenote[", self.typ())
+
+    def test_block_sidenote_reaches_the_template(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n::: {.sidenote}\n块级边注内容。\n:::\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("#sidenote-block[", self.typ())
+
+    def test_markers_switch_the_document_into_margin_mode(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n正文[边注]{.sidenote}。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('style: "margin"', self.typ())
+
+    def test_margin_style_knob_reaches_the_style_dict(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n正文[边注]{.sidenote}。\n",
+            "--set", "note.width=3.5cm", "--set", "note.gap=8pt",
+        )
+        self.assertEqual(code, 0, err)
+        typ = self.typ()
+        self.assertIn("width: 3.5cm", typ)
+        self.assertIn("gap: 8pt", typ)
+
+    def test_default_document_without_markers_stays_footnote(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n正文[^1]。\n\n[^1]: 页脚注释。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('style: "footnote"', self.typ())
+
+    def test_explicit_footnote_choice_keeps_the_footer(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n正文[边注]{.sidenote}。\n",
+            "--set", "note.style=footnote",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('style: "footnote"', self.typ())
+
+    def test_code_example_does_not_switch_margin_mode(self):
+        code, _, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "示例：\n\n```markdown\n正文[注]{.sidenote}。\n```\n\n正文。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn('style: "footnote"', self.typ())
+
+    def test_long_sidenote_warns(self):
+        long_note = "这是一条很长的边注，" * 30
+        code, out, err = self.build_doc(
+            f"---\ntitle: 测试\n---\n\n正文[{long_note}]{{.sidenote}}。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("边注过长", out + err)
+
+    def test_close_sidenotes_warn(self):
+        code, out, err = self.build_doc(
+            "---\ntitle: 测试\n---\n\n"
+            "正文[注一]{.sidenote}。\n\n正文[注二]{.sidenote}。\n"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("间距过近", out + err)
+
+    def test_style_subcommand_resolves_the_same_note_mode(self):
+        self.build_doc("---\ntitle: 测试\n---\n\n正文[边注]{.sidenote}。\n")
+        code, out, err = run_cli(["style", str(self.tmp / "doc.md")])
+        self.assertEqual(code, 0, err)
+        self.assertIn("style: margin", out)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
