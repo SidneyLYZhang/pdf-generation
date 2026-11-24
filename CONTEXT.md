@@ -36,6 +36,10 @@ _Avoid_: 教材、teaching material
 带封面、章首装饰、首字下沉与段首缩进，标题不编号的小说版式。
 _Avoid_: 小说、fiction
 
+**Scene**:
+原则文档里的四种写作场景（论文、报告、小说、技术教材）。场景名是中文，Kind 名始终用英文标识符；两者是多对一映射而不是同义词，具体映射见 [references/typography.md](references/typography.md) 的「场景与 Kind」。
+_Avoid_: 文档类型、类别、把场景直接叫 kind
+
 **Citation**:
 正文里指向一条参考条目的标注，写作 `[@key]`，显示形式（编号或「作者-年」）由 CSL 样式决定。
 _Avoid_: 引用、reference
@@ -75,6 +79,18 @@ _Avoid_: 主题、theme、配色方案
 **Preset**:
 某个 Kind 的默认 Knob 取值组合。
 _Avoid_: 模板、template、默认样式
+
+**Principle check**:
+构建前的门禁与构建后六项目检的合称。门禁分两档：结构性矛盾阻断构建（退出码 1），区间越界只警告，警告必须写进 Layout plan。
+_Avoid_: 排版检查、lint
+
+**Deviation**:
+一条显式的偏离记录：规则标识、来源（机构规范或用户授权）与原因。它写在 doc.yml 的 `deviations:` 里，并随生成的 `.typ` 头部一起走，所以文件被搬走仍认自己那条记录。没有记录的偏离一律拒绝。
+_Avoid_: 例外、豁免、override、绕过
+
+**Layout plan**:
+一次排版的交付说明，也就是「排版方案」：固定四行——方案、依据、自检、偏离。它是用户需求与原则的交集——用户要的效果落在原则之内，越界的部分换成最近邻或记成 Deviation。
+_Avoid_: 设计稿、样式方案、版式说明
 
 **Clarify phase**:
 生成前汇总不确定信息并向用户提问的阶段，只问会改变成品的项。

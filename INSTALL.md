@@ -169,6 +169,7 @@ python scripts/build_pdf.py build examples/report.md
 ```
 <skill>/
 ├── SKILL.md          ← 必需，必须在根部，name 与目录名一致
+├── CONTEXT.md        ← 术语表；SKILL.md 链着它，漏搬会出现断链
 ├── scripts/build_pdf.py
 ├── template/*.typ    ← 构建时按文件名顺序内联
 ├── filters/features.lua

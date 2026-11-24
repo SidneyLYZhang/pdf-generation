@@ -7,6 +7,20 @@ description: 把 Markdown 排成 PDF（Typst 排版，不装 LaTeX）：报告�
 
 pandoc 把 Markdown 解析成 Typst 源码（`-f` 默认是钉死的 pandoc markdown 扩展串，见 `--from`），版式由本 skill 自带的模板承担，`typst` 直接渲染 PDF。七种 Kind、一个 Style spec、一条固定流程。
 
+**排版原则是硬约束。** 规范全文在 [references/typography.md](references/typography.md)，下面这些是每次都要过一遍的部分：
+
+**两条阻断**（构建以退出码 1 拒绝）：
+- 首行缩进与可见段距同时存在——同一件事被两种手段重复表达（段距高于 4.5pt 才算「可见」，那是 Typst 的下限）。
+- 没有首行缩进，段距却不大于行距间隙——段落之间看不出分隔。
+
+**四条警告**（照常出 PDF，但必须写进交付的「依据」里）：
+- 中文行距 1.40–1.75×（口径是（行盒 + leading）÷ 字号，不是 1 + leading）。
+- 每行字数：中文 25–45、西文 50–75（信函与便签按一次读完处理，不判这条）。
+- 一级标题 ≥ 正文 1.3 倍。
+- 标题层级 ≤ 4 级。
+
+**冲突时谁赢**：机构/期刊规范 > 原则 > 用户明确要求 > Kind 默认。出口只有两个——机构规范、用户显式授权——都要留下带原因的偏离记录（`doc.yml` 的 `deviations:`，或 `build --deviation 规则=原因`，机构规范再加 `--deviation-source standard`）。只有阻断规则能记偏离，警告不接受；记录写法见 [references/typography.md](references/typography.md) 的「偏离」一节。没有记录的偏离一律拒绝。
+
 流程六步；每一步末尾的完成判据不成立，就不进入下一步。
 
 ## 1. 扫描
@@ -77,20 +91,29 @@ python scripts/build_pdf.py build book.md ch01.md ch02.md
 
 产物三件：`<stem>.pdf`（交付）、`<stem>.typ`（自包含；手工编译用文件头那行现成命令，需要时带 `--root` / `--package-path`）、`<stem>/` 下的抽页 PNG。
 
-**完成判据**：命令退出码为 0，且输出里有 `PDF ... (N 页)`。
+**完成判据**：命令退出码为 0，且输出里有 `PDF ... (N 页)`。退出码 0 表示没有触发阻断规则；`i` 开头是构建说明（放行的偏离、被跳过的检查、被抬高的段距），`!` 开头是警告（原则区间越界，以及缺字体、溢出、边注过密这类）——两者都逐条记下，它是交付说明「依据」与「偏离」两行的素材。
 
 ## 5. 抽页目检
 
 用读图能力打开构建打印出的 PNG。默认抽文档中部的一页正文；出现 warning（缺字体、内容溢出）时自动多抽封面和前几页。
 
-看三件事：字体是否成方块、表格/代码是否溢出、封面与目录是否错位。文档里有**棋谱、图表、边注、行号**时，对应那页要单独看一眼：棋盘有没有缺子、图表是否被裁、边注有没有压住正文。
+看六件事：
+
+1. 缺字与方块——字体是否真的装上了。
+2. 溢出——表格、代码、公式是否出界或压住页脚。
+3. 封面与目录是否错位。
+4. 层级——一级标题是否明显大于正文，二三级是否靠字重也分得开。
+5. 留白——行距、段距、标题上方间距是否成体系，而不是忽宽忽紧；缩进型 Kind（`book` / `textbook` / `novel`）的段距本来就压在下限，看的是「有没有多出一块空隙」。
+6. 突兀——有没有孤零零的色块、超大标题、居中长段。
+
+文档里有**棋谱、图表、边注、行号**时，对应那页单独看一眼：棋盘有没有缺子、图表是否被裁、边注有没有压住正文。
 
 ```bash
 python scripts/build_pdf.py build doc.md --check all   # 全量逐页
 python scripts/build_pdf.py build doc.typ              # 只查已有 .typ
 ```
 
-**完成判据**：你看过至少一张抽页，并能说出上面三件事各自的状态；文档里有棋谱、图表、边注或行号时，对应那页也看过。
+**完成判据**：六项逐条给结论——只报不通过的项与看到的现象，全过时一句话收尾；文档里有棋谱、图表、边注或行号时，对应那页也看过。
 
 ## 6. 调整
 
@@ -102,6 +125,19 @@ python scripts/build_pdf.py build doc.md --set heading.size-1=18pt --set color.p
 ```
 
 **完成判据**：新 PDF 已生成，且第 5 步的抽页重新看过一遍。
+
+## 交付（Layout plan）
+
+每次都附这四行，不展开：
+
+| 行 | 写什么 |
+|----|--------|
+| 方案 | Kind、纸张、配色、正文与标题的字号行距，一句话 |
+| 依据 | 命中了哪几条规则：阻断的是否被放行、警告的有哪几条 |
+| 自检 | 第 5 步六项里不通过的项与现象；全过写「六项均过」 |
+| 偏离 | 无则写「无」；有则写规则、来源（机构规范 / 用户授权）、原因 |
+
+四行之外不必复述页数与路径——构建已经打印过了。
 
 ## Kind 速查
 
@@ -140,6 +176,7 @@ python scripts/build_pdf.py build doc.md --set heading.size-1=18pt --set color.p
 - [references/typography.md](references/typography.md) — 排版原则的规范：两档规则、口径、场景映射、偏离写法；动版式之前先读这份
 - [references/style-knobs.md](references/style-knobs.md) — 全部旋钮、取值格式、各 Kind 覆盖表
 - [references/troubleshooting.md](references/troubleshooting.md) — 报错与版式问题的处理
+- [CONTEXT.md](CONTEXT.md) — 术语表：Kind、Scene、Style spec、Layout plan、Principle check、Deviation 只按这里的定义用
 - [INSTALL.md](INSTALL.md) — 安装（分「用户」与「Agent」两部分）
 
 Kind 速查与内容速查已经链到 kinds、authoring、citations、chess 四份文档。

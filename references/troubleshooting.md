@@ -53,7 +53,7 @@ python scripts/build_pdf.py doctor
 python scripts/build_pdf.py build doc.md --deviation "indent-and-spacing=期刊模板要求段间空一行"
 ```
 
-`--deviation` 只负责把记录写进 `<首个输入文件>.doc.yml`；真正放行的是文件里的记录，删掉它，同样的 spec 又会被拒。加 `--deviation-source standard` 把来源标记为机构规范（默认 `user`）。记录还会写进生成的 `.typ` 头部，所以 `.typ` 被改名或搬走后 `build x.typ` 仍认自己的豁免；头部没有记录、旁边也没有 doc.yml 时，它照样被拦。
+`--deviation` 只负责把记录写进 `<首个输入文件>.doc.yml`；真正放行的是文件里的记录，删掉它，同样的 spec 又会被拒。加 `--deviation-source standard` 把来源标记为机构规范（默认 `user`）。记录还会写进生成的 `.typ` 头部，所以 `.typ` 被改名或搬走后 `build x.typ` 仍认自己那条记录；头部没有记录、旁边也没有 doc.yml 时，它照样被拦。
 
 没写原因的偏离一律拒绝，这是刻意的：静默绕过会让门禁变成装饰。
 

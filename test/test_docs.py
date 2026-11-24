@@ -87,5 +87,52 @@ class GeneratedDocsTests(unittest.TestCase):
         self.assertIn("标记", str(caught.exception))
 
 
+class EntryDocTests(unittest.TestCase):
+    """The entry has to carry the gate's numbers, not just point at them."""
+
+    def entry(self) -> str:
+        return (ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_entry_quotes_the_ranges_the_code_uses(self):
+        entry = self.entry()
+        low, high = bp.CHINESE_LEADING
+        self.assertIn(f"中文行距 {low:.2f}–{high:.2f}×", entry)
+        low, high = bp.CHINESE_MEASURE
+        other_low, other_high = bp.WESTERN_MEASURE
+        self.assertIn(f"中文 {low}–{high}、西文 {other_low}–{other_high}", entry)
+        self.assertIn(f"一级标题 ≥ 正文 {bp.HEADING_RATIO_MIN:g} 倍", entry)
+        self.assertIn(f"标题层级 ≤ {bp.MAX_HEADING_LEVEL} 级", entry)
+
+    def test_every_reference_doc_is_reachable_from_the_entry(self):
+        entry = self.entry()
+        for path in sorted((ROOT / "references").glob("*.md")):
+            self.assertIn(path.name, entry, f"SKILL.md 没有指向 {path.name}")
+
+    def test_entry_links_the_glossary(self):
+        self.assertIn("CONTEXT.md", self.entry())
+
+    def test_install_contract_ships_what_the_entry_links(self):
+        install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+        self.assertIn("CONTEXT.md", install, "安装契约漏了 CONTEXT.md，装好后入口会断链")
+
+    def test_glossary_defines_the_new_terms(self):
+        glossary = (ROOT / "CONTEXT.md").read_text(encoding="utf-8")
+        for term in ("**Scene**", "**Layout plan**", "**Principle check**", "**Deviation**"):
+            self.assertIn(term, glossary)
+
+    def test_raw_principle_docs_point_at_the_spec(self):
+        for name in ("总排版原则.md", "细节排版原则.md"):
+            text = (ROOT / "docs" / name).read_text(encoding="utf-8")
+            # The full relative path matters: docs/ needs the ../ hop.
+            self.assertIn("../references/typography.md", text, name)
+
+    def test_entry_keeps_the_six_steps_and_the_four_line_plan(self):
+        entry = self.entry()
+        for number in range(1, 7):
+            self.assertIn(f"## {number}.", entry)
+        for row in ("| 方案 |", "| 依据 |", "| 自检 |", "| 偏离 |"):
+            self.assertIn(row, entry)
+
+
 if __name__ == "__main__":
     unittest.main()
