@@ -168,6 +168,15 @@ class ResolveStyleTests(unittest.TestCase):
             gap = bp.length_pt(style["text"]["paragraph-spacing"], size)
             self.assertGreater(gap, lead, kind)
 
+    def test_no_kind_turns_off_justified_text(self):
+        # Novel keeps justified text (typography.md): the ban is on stretched
+        # letter spacing, not on justification — Typst breaks at character
+        # boundaries and leaves the last line ragged anyway.  A preset that
+        # quietly set `text.justify: false` would undo that decision.
+        for kind in bp.KINDS:
+            with self.subTest(kind=kind):
+                self.assertIs(bp.resolve_style(kind, {}, [], "zh")["text"]["justify"], True)
+
     def test_letter_heading_reaches_thirty_percent_above_body(self):
         style = bp.resolve_style("letter", {}, [], "zh")
         body = bp.length_pt(style["text"]["size"], 11.0)
