@@ -1177,6 +1177,29 @@ class PrincipleGateTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("[line-height]", out)
 
+    def test_old_typ_without_margin_axes_still_compiles(self):
+        # Files generated before the margin split only carry `margin`; the
+        # template has to keep reading them.  An English report is the
+        # interesting case: its two axes differ.
+        doc = self.tmp / "axes.md"
+        doc.write_text("# Title\n\nOne paragraph of English prose.\n", encoding="utf-8")
+        out = self.tmp / "axes.pdf"
+        code, _, err = run_cli(["build", str(doc), "-o", str(out), "--check", "none"])
+        self.assertEqual(code, 0, err)
+        typ = out.with_suffix(".typ")
+        text = typ.read_text(encoding="utf-8")
+        self.assertIn("margin-x: 4.8cm,", text)
+        self.assertIn("margin-y: 2.5cm,", text)
+        stripped = "\n".join(
+            line for line in text.splitlines()
+            if not line.strip().startswith(("margin-x:", "margin-y:"))
+        )
+        self.assertNotEqual(stripped, text)
+        typ.write_text(stripped, encoding="utf-8")
+        code, printed, err = run_cli(["build", str(typ), "--check", "none"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("页数", printed)
+
     def test_heading_depth_warning_reaches_the_build(self):
         deep = self.tmp / "deep.md"
         deep.write_text(

@@ -25,8 +25,14 @@
 // Page margins: a symmetric margin, a binding gutter, and the extra outer
 // column that margin notes need.  `inside`/`outside` make Typst mirror the
 // two sides on odd/even pages.
+// Page margins come in two axes, so a narrower measure can be bought without
+// also squeezing the text block vertically.  `margin` remains the shorthand;
+// files generated before the split only carry it, hence the defaults.
+#let page-margin-x(st) = st.page.at("margin-x", default: st.page.margin)
+#let page-margin-y(st) = st.page.at("margin-y", default: st.page.margin)
+
 #let margin-parts(st) = {
-  let base = st.page.margin
+  let base = page-margin-x(st)
   if st.note.style == "margin" {
     (inside: base + st.page.gutter, outside: base + st.note.width + st.note.gap)
   } else {
@@ -36,10 +42,11 @@
 
 #let page-margin(st) = {
   let parts = margin-parts(st)
-  if st.page.gutter == 0cm and st.note.style != "margin" {
-    st.page.margin
+  let vertical = page-margin-y(st)
+  if st.page.gutter == 0cm and st.note.style != "margin" and parts.inside == vertical {
+    vertical
   } else {
-    (inside: parts.inside, outside: parts.outside, top: st.page.margin, bottom: st.page.margin)
+    (inside: parts.inside, outside: parts.outside, top: vertical, bottom: vertical)
   }
 }
 

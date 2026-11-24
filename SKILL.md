@@ -137,6 +137,7 @@ python scripts/build_pdf.py build doc.md --set heading.size-1=18pt --set color.p
 
 按需读取，不必预先加载：
 
+- [references/typography.md](references/typography.md) — 排版原则的规范：两档规则、口径、场景映射、偏离写法；动版式之前先读这份
 - [references/style-knobs.md](references/style-knobs.md) — 全部旋钮、取值格式、各 Kind 覆盖表
 - [references/troubleshooting.md](references/troubleshooting.md) — 报错与版式问题的处理
 - [INSTALL.md](INSTALL.md) — 安装（分「用户」与「Agent」两部分）

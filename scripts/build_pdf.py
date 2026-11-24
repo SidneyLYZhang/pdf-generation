@@ -57,6 +57,10 @@ KINDS = ("report", "article", "letter", "note", "book", "textbook", "novel")
 # is「紧凑排版, 少留白」).  A wide measure there is a build warning, not a default.
 COMPACT_KINDS = {"note"}
 
+# English prose at 11pt on A4 needs a narrower measure; kept here so the
+# generated docs quote the number the build actually uses.
+ENGLISH_MARGIN_X = "4.8cm"
+
 # The Markdown dialect is a pinned constant, not pandoc's default, so that a
 # pandoc upgrade cannot silently change how documents parse (ADR-0003).
 #   +lists_without_preceding_blankline  keep GFM's "list right after a colon line"
@@ -82,6 +86,8 @@ KNOBS: dict[str, tuple[str, object]] = {
     # page -------------------------------------------------------------------
     "page.paper": ("paper", "a4"),
     "page.margin": ("length", "2.5cm"),
+    "page.margin-x": ("lengthauto", "auto"),
+    "page.margin-y": ("lengthauto", "auto"),
     "page.gutter": ("length", "0cm"),
     # text -------------------------------------------------------------------
     "text.font": ("fontlist", "auto"),
@@ -888,9 +894,13 @@ def coerce(path: str, value: object) -> object:
                 raise SpecError(f"{path} 需要字体数组，收到 {value!r}")
             return [str(v) for v in parsed]
         return [part.strip() for part in raw.split(",") if part.strip()]
-    if typ in ("length", "ratio"):
+    if typ in ("length", "lengthauto", "ratio"):
         s = str(value).strip()
-        if typ == "length" and not re.fullmatch(r"-?\d+(\.\d+)?(pt|cm|mm|in|em|%|ch)", s):
+        if typ == "lengthauto" and s.lower() == "auto":
+            return "auto"
+        if typ in ("length", "lengthauto") and not re.fullmatch(
+            r"-?\d+(\.\d+)?(pt|cm|mm|in|em|%|ch)", s
+        ):
             raise SpecError(f"{path} 需要长度（如 2.5cm / 11pt），收到 {value!r}")
         if typ == "ratio" and not re.fullmatch(r"\d+(\.\d+)?%", s):
             raise SpecError(f"{path} 需要百分比（如 82%），收到 {value!r}")
@@ -1014,6 +1024,13 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
     # `text.lang` is already resolved (auto → the detected language), so a
     # `--set text.lang=en` also moves the citation defaults with it.
     chinese = str(flat["text.lang"]).startswith("zh")
+    # A single margin is the shorthand; the two axes fall back to it.  `auto`
+    # means "no opinion on this axis", which is what lets the English rule below
+    # narrow the measure without overruling a margin the author actually chose.
+    x_auto = flat["page.margin-x"] == "auto"
+    for axis in ("margin-x", "margin-y"):
+        if flat[f"page.{axis}"] == "auto":
+            flat[f"page.{axis}"] = flat["page.margin"]
     if flat["cite.style"] == "auto":
         # Article-like documents follow author-date convention; numeric styles
         # are the safe default for reports and books.
@@ -1025,19 +1042,22 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
         flat["cite.title"] = "参考文献" if chinese else "References"
     # Running English prose at 11pt on A4 needs a narrower measure than the
     # 2.5cm default gives: 16cm runs to ~100 characters a line, past the 50–75
-    # the typography spec calls comfortable.  The margin knob is symmetric, so
-    # the top and bottom grow too; Kinds that pin their own margin are left
-    # alone (textbook's margin column depends on it), and so is `note`, whose
-    # whole identity is a compact page (CONTEXT.md: Note — 少留白).  A wide
-    # measure there is reported by the build warning instead.
+    # the typography spec calls comfortable.  Only the horizontal axis widens, so
+    # the text block does not also lose height, and only when that axis is still
+    # `auto` — pinning the vertical axis alone must not switch the rule off.
+    # Kinds that pin their own margin are left alone (textbook's margin column
+    # depends on it), and so is `note`, whose whole identity is a compact page
+    # (CONTEXT.md: Note — 少留白).  A wide measure there is reported by the build
+    # warning instead.
     if (
         not chinese
         and flat["page.paper"] == "a4"
         and kind not in COMPACT_KINDS
+        and x_auto
         and not pinned("page.margin", entries, sets)
         and "page.margin" not in preset
     ):
-        flat["page.margin"] = "4.8cm"
+        flat["page.margin-x"] = ENGLISH_MARGIN_X
     # An explicit `[text]{.sidenote}` is a request for margin space, so it turns
     # margin mode on — unless the author set `note.style` on purpose, in which
     # case the precedence rule in style-knobs.md wins and notes fall back to
@@ -1110,6 +1130,8 @@ CHINESE_LEADING = (1.40, 1.75)
 WESTERN_LEADING = (1.20, 1.45)
 CHINESE_MEASURE = (25, 45)
 WESTERN_MEASURE = (50, 75)
+HEADING_RATIO_MIN = 1.3
+MAX_HEADING_LEVEL = 4
 
 # Typst builds the line box out of the font's own metrics.  Measured with a
 # 300 ppi probe: 8.00pt at 11pt for Noto Serif SC (0.727em), 7.24pt for
@@ -1216,11 +1238,17 @@ def _line_height(style: dict, level: int) -> str | None:
     )
 
 
+def _margin_x(style: dict) -> float:
+    """The horizontal margin; older generated files only carry `margin`."""
+    page = style.get("page") or {}
+    return _length_of(style, "page", "margin-x" if "margin-x" in page else "margin")
+
+
 def text_width_pt(style: dict) -> float:
     """The measure: paper width minus the inside and outside columns."""
     page = style.get("page") or {}
     width_mm = PAPER_MM.get(str(page.get("paper", "a4")), PAPER_MM["a4"])[0]
-    margin = _length_of(style, "page", "margin")
+    margin = _margin_x(style)
     inside = margin + _length_of(style, "page", "gutter")
     outside = margin
     if (style.get("note") or {}).get("style") == "margin":
@@ -1255,15 +1283,18 @@ def _heading_ratio(style: dict, level: int) -> str | None:
     size = _length_of(style, "text", "size")
     head = _length_of(style, "heading", "size-1")
     ratio = head / size
-    if ratio >= 1.3 - 1e-9:
+    if ratio >= HEADING_RATIO_MIN - 1e-9:
         return None
-    return f"一级标题 {head:g}pt ÷ 正文 {size:g}pt = {ratio:.2f}，建议 ≥ 1.3。"
+    return (
+        f"一级标题 {head:g}pt ÷ 正文 {size:g}pt = {ratio:.2f}，"
+        f"建议 ≥ {HEADING_RATIO_MIN:.2f}。"
+    )
 
 
 def _heading_depth(style: dict, level: int) -> str | None:
-    if level <= 4:
+    if level <= MAX_HEADING_LEVEL:
         return None
-    return f"文档有 {level} 级标题，建议不超过 4 级——层级太多等于没有层级。"
+    return f"文档有 {level} 级标题，建议不超过 {MAX_HEADING_LEVEL} 级——层级太多等于没有层级。"
 
 
 PRINCIPLE_RULES = (
@@ -1276,6 +1307,31 @@ PRINCIPLE_RULES = (
 )
 RULE_SEVERITY = {rule: severity for rule, severity, _ in PRINCIPLE_RULES}
 ERROR_RULES = {rule for rule, severity in RULE_SEVERITY.items() if severity == "error"}
+
+# What each rule checks, for the table the spec generator writes.  The bands are
+# formatted from the constants above, so the published table cannot quote a
+# number the code does not use.
+RULE_SUMMARY = {
+    "indent-and-spacing": (
+        "首行缩进与可见段距同时存在",
+        f"缩进 > 0 且段距 > {PARAGRAPH_SPACING_FLOOR}",
+    ),
+    "spacing-below-leading": (
+        "没有首行缩进，段距不大于行距间隙",
+        "段距 ≤ 行距（缩进为 0）",
+    ),
+    "line-height": (
+        "行距倍数 = (行盒 + leading) ÷ 字号",
+        f"中文 {CHINESE_LEADING[0]:.2f}–{CHINESE_LEADING[1]:.2f}×",
+    ),
+    "measure": (
+        "每行字数",
+        f"中文 {CHINESE_MEASURE[0]}–{CHINESE_MEASURE[1]} 字；"
+        f"西文 {WESTERN_MEASURE[0]}–{WESTERN_MEASURE[1]} 字符",
+    ),
+    "heading-ratio": ("一级标题 ÷ 正文", f"≥ {HEADING_RATIO_MIN:.2f}"),
+    "heading-depth": ("标题层级", f"≤ {MAX_HEADING_LEVEL} 级"),
+}
 
 
 def heading_depth(text: str) -> int:
@@ -1454,7 +1510,7 @@ def tval(typ: str, value: object) -> str:
         return str(int(value))
     if typ == "color":
         return f'rgb("{value}")'
-    if typ in ("length", "ratio"):
+    if typ in ("length", "lengthauto", "ratio"):
         # Already validated by coerce(); emit as a Typst literal.
         return str(value)
     if typ in ("numbering", "paper", "palette", "coverstyle",

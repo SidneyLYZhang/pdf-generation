@@ -177,13 +177,36 @@ class ResolveStyleTests(unittest.TestCase):
     def test_english_a4_gets_a_narrower_measure(self):
         en = bp.resolve_style("report", {}, [], "en")
         zh = bp.resolve_style("report", {}, [], "zh")
-        self.assertEqual(en["page"]["margin"], "4.8cm")
-        self.assertEqual(zh["page"]["margin"], "2.5cm")
+        self.assertEqual(en["page"]["margin-x"], "4.8cm")
+        # Only the horizontal axis moves: the text block keeps its height.
+        self.assertEqual(en["page"]["margin-y"], "2.5cm")
+        self.assertEqual(zh["page"]["margin-x"], "2.5cm")
+
+    def test_margin_axes_default_to_the_single_margin(self):
+        style = bp.resolve_style("report", {}, ["page.margin=2cm"], "zh")
+        self.assertEqual(style["page"]["margin-x"], "2cm")
+        self.assertEqual(style["page"]["margin-y"], "2cm")
+        one_axis = bp.resolve_style("report", {}, ["page.margin-x=1.5cm"], "zh")
+        self.assertEqual(one_axis["page"]["margin-x"], "1.5cm")
+        self.assertEqual(one_axis["page"]["margin-y"], "2.5cm")
+
+    def test_pinning_the_vertical_axis_keeps_the_english_rule_on(self):
+        # Asking for a tighter top margin is not a request to keep a 100-character
+        # line; only the axis the author touched is off limits.
+        style = bp.resolve_style("report", {}, ["page.margin-y=2cm"], "en")
+        self.assertEqual(style["page"]["margin-y"], "2cm")
+        self.assertEqual(style["page"]["margin-x"], bp.ENGLISH_MARGIN_X)
+
+    def test_explicit_auto_still_means_no_opinion(self):
+        auto = bp.resolve_style("report", {}, ["page.margin-x=auto"], "en")
+        pinned = bp.resolve_style("report", {}, ["page.margin-x=2cm"], "en")
+        self.assertEqual(auto["page"]["margin-x"], bp.ENGLISH_MARGIN_X)
+        self.assertEqual(pinned["page"]["margin-x"], "2cm")
 
     def test_english_measure_lands_in_comfortable_character_count(self):
         style = bp.resolve_style("report", {}, [], "en")
         a4_width = 210 / 25.4 * 72
-        margin = bp.length_pt(style["page"]["margin"], 11.0)
+        margin = bp.length_pt(style["page"]["margin-x"], 11.0)
         size = bp.length_pt(style["text"]["size"], 11.0)
         # Running prose in Libertinus averages at most 0.42em per character;
         # the wide bound keeps this assertion from overstating the result.

@@ -107,7 +107,7 @@ pdf-generation/
 ├── vendor/typst-packages/   # 内联的 staunton 2.0.0（GPL 子目录，见 NOTICE）
 ├── scripts/build_pdf.py     # detect / build / style / check / doctor
 ├── test/                    # 无第三方依赖的测试
-├── references/              # kinds / style-knobs / authoring / citations / chess / troubleshooting
+├── references/              # typography（规范）/ kinds / style-knobs / authoring / citations / chess / troubleshooting
 └── examples/                # 七种 Kind 各一份样张
 ```
 

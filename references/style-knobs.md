@@ -14,14 +14,16 @@
 
 未知 key 会直接报错，并给出最接近的合法项。
 
-另有一处默认随语言推导：纯英文 A4 文档的页边距取 `4.8cm`，让每行落在约 70–75 字符（原则区间 50–75）；作者显式设置的页边距、自带页边距的 Kind、以及 `note` 不受影响。
+另有一处默认随语言推导：纯英文 A4 文档的左右页边距取 `4.8cm`，让每行落进 50–75 字符的区间；上下边距不变。作者显式设置的页边距、自带页边距的 Kind、以及 `note` 不受影响。
 
 ## 全局默认
 
 | 旋钮 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `page.paper` | paper | `a4` | 纸张：a4 / a5 / 6x9 / letter |
-| `page.margin` | length | `2.5cm` | 四边页边距 |
+| `page.margin` | length | `2.5cm` | 四边页边距（下面两个轴写 auto 时用它） |
+| `page.margin-x` | length｜auto | `auto` | 左右页边距（版心宽度）；auto = 跟随 page.margin（style --write 写出的是解析后的值） |
+| `page.margin-y` | length｜auto | `auto` | 上下页边距；auto = 跟随 page.margin（style --write 写出的是解析后的值） |
 | `page.gutter` | length | `0cm` | 装订线（内侧额外留白） |
 | `text.font` | fontlist | `auto` | 正文字体栈，按顺序取字形 |
 | `text.heading-font` | fontlist | `auto` | 标题字体栈 |
