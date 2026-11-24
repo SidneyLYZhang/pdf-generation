@@ -7,6 +7,7 @@ tests are the gate that stops either from drifting away from `build_pdf.py`.
 
 import contextlib
 import io
+import re
 import shutil
 import sys
 import tempfile
@@ -135,6 +136,23 @@ class EntryDocTests(unittest.TestCase):
             self.assertIn(f"## {number}.", entry)
         for row in ("| 方案 |", "| 依据 |", "| 自检 |", "| 偏离 |"):
             self.assertIn(row, entry)
+
+    def test_document_links_resolve(self):
+        # A moved file (CONTEXT.md was one) turns a pointer into a dead end.
+        for name in (
+            "SKILL.md", "README.md", "INSTALL.md", "CONTEXT.md",
+            "references/typography.md", "references/kinds.md",
+            "references/style-knobs.md", "references/troubleshooting.md",
+            "references/authoring.md",
+        ):
+            text = bp.prose_only((ROOT / name).read_text(encoding="utf-8"))
+            for target in re.findall(r"\]\(([^)#]+)\)", text):
+                if "://" in target or target.startswith("#"):
+                    continue
+                resolved = (ROOT / name).parent / target
+                self.assertTrue(
+                    resolved.exists(), f"{name} 里的链接指向不存在的 {target}"
+                )
 
 
 if __name__ == "__main__":

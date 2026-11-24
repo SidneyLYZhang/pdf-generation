@@ -77,7 +77,7 @@ python scripts/build_pdf.py doctor
 python scripts/build_pdf.py build examples/report.md
 ```
 
-`doctor` 应逐行打印 `ok`，最后一行是 `模板自检 N 页`。第二条命令结束后，`examples/report.pdf` 应该存在，并打印出抽页 PNG 的路径——打开它看一眼，中文不是方块就成功了。
+`doctor` 应逐行打印 `ok`，最后一行是 `模板自检 N 页`。第二条命令结束后，`examples/report.pdf` 应该存在，并打印出抽页 PNG 的路径——打开它看一眼，中文不是方块就成功了。构建前会过一遍排版原则门禁，默认值全部合规，正常不会拦你；被拦时见 [references/troubleshooting.md](references/troubleshooting.md) 的「排版原则校验未通过」。
 
 ### 5. 更新与卸载
 
@@ -97,6 +97,7 @@ rm -rf ~/.dsh/skills/pdf-generation             # 卸载
 | 中文全是方块 | 字体没装或少装：`typst fonts` 里应出现 `Noto Serif SC` |
 | 想用自己的字体 | `--set text.font='["Your Serif","Noto Serif SC"]'`，或在 `doc.yml` 里写字体栈 |
 | 公司代理 / 证书 | 与本技能无关：Typst、pandoc、模板都不联网 |
+| `排版原则校验未通过` | 不是安装问题：旋钮改出了自相矛盾的组合。按报错改旋钮，或写一条带原因的偏离，见 troubleshooting |
 | macOS 提示 Typst 无法验证 | 系统设置 → 隐私与安全性 → 仍要打开 |
 
 ### 附：棋谱包（已内联，无需安装）
@@ -171,6 +172,7 @@ python scripts/build_pdf.py build examples/report.md
 ├── SKILL.md          ← 必需，必须在根部，name 与目录名一致
 ├── CONTEXT.md        ← 术语表；SKILL.md 链着它，漏搬会出现断链
 ├── scripts/build_pdf.py
+├── scripts/gen_style_docs.py   ← 只在重新生成文档表格时用，可选
 ├── template/*.typ    ← 构建时按文件名顺序内联
 ├── filters/features.lua
 ├── filters/refs.lua
@@ -185,6 +187,7 @@ python scripts/build_pdf.py build examples/report.md
 - 脚本用「自身位置」定位技能根（`scripts/../`），**整个目录一起搬**，不要只复制 `SKILL.md`。
 - 不要改 `template/` 内的相对路径假设；构建时模板会被拼进同一个 `.typ`。
 - 运行时不需要网络：模板自带、不拉 Typst 包。
+- `docs/` 与 `test/` 只服务仓库维护（原则原文、决策记录、测试），运行时代码不读它们，装的时候可以不带。
 
 ### 宿主差异
 
@@ -202,5 +205,5 @@ python scripts/build_pdf.py build examples/report.md
 python -m unittest discover -s test -v
 ```
 
-它覆盖 YAML 子集解析、样式优先级、CLI 参数校验、抽页规则，以及七种 Kind 的端到端构建（缺 typst/pandoc 时自动跳过）。
+它覆盖 YAML 子集解析、样式优先级、CLI 参数校验、抽页规则、排版原则门禁与偏离通道、生成文档与代码的一致性，以及七种 Kind 的端到端构建（缺 typst/pandoc 时自动跳过）。
 
