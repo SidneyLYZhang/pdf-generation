@@ -1156,6 +1156,38 @@ class PrincipleGateTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("indent-and-spacing", err)
 
+    def test_a_warning_does_not_stop_the_build(self):
+        code, out, err = self.build("--set", "text.leading=0.55em")
+        self.assertEqual(code, 0, err)
+        self.assertIn("[line-height]", out)
+        low, high = bp.CHINESE_LEADING
+        self.assertIn(f"{low:.2f}–{high:.2f}×", out)
+
+    def test_style_command_prints_warnings_to_stderr(self):
+        code, out, err = run_cli(["style", str(self.doc), "--set", "text.leading=0.55em"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("[line-height]", err)
+        # stdout stays a parseable spec: people pipe it into doc.yml.
+        self.assertNotIn("[line-height]", out)
+
+    def test_typ_path_reports_warnings_too(self):
+        code, _, err = self.build("--set", "text.leading=0.55em")
+        self.assertEqual(code, 0, err)
+        code, out, err = run_cli(["build", str(self.tmp / "gate.typ"), "--check", "none"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("[line-height]", out)
+
+    def test_heading_depth_warning_reaches_the_build(self):
+        deep = self.tmp / "deep.md"
+        deep.write_text(
+            "# 一\n\n## 二\n\n### 三\n\n#### 四\n\n##### 五\n\n正文。\n", encoding="utf-8"
+        )
+        out = self.tmp / "deep.pdf"
+        code, printed, err = run_cli(["build", str(deep), "-o", str(out), "--check", "none"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("[heading-depth]", printed)
+        self.assertIn("5 级", printed)
+
     def test_unknown_deviation_rule_is_refused(self):
         code, _, err = self.build("--deviation", "no-such-rule=理由")
         self.assertEqual(code, 1)

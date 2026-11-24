@@ -42,7 +42,7 @@ python scripts/build_pdf.py doctor
 
 ### `排版原则校验未通过：[indent-and-spacing] ...`
 
-构建前的门禁拒绝了一个自相矛盾的 Style spec。现行两条规则：
+构建前的门禁**阻断**了一个自相矛盾的 Style spec——`排版原则校验未通过` 是唯一会因此失败的一类错误。两条阻断规则：
 
 - `indent-and-spacing`：首行缩进与可见段距同时在用，分段手段重复。把 `text.paragraph-spacing` 降到 4.5pt（Typst 的下限），让缩进独自分段。
 - `spacing-below-leading`：没有首行缩进，段距却不大于行距间隙，段落之间看不出分隔。把 `text.paragraph-spacing` 提到行距间隙之上。
@@ -56,6 +56,17 @@ python scripts/build_pdf.py build doc.md --deviation "indent-and-spacing=期刊�
 `--deviation` 只负责把记录写进 `<首个输入文件>.doc.yml`；真正放行的是文件里的记录，删掉它，同样的 spec 又会被拒。加 `--deviation-source standard` 把来源标记为机构规范（默认 `user`）。记录还会写进生成的 `.typ` 头部，所以 `.typ` 被改名或搬走后 `build x.typ` 仍认自己的豁免；头部没有记录、旁边也没有 doc.yml 时，它照样被拦。
 
 没写原因的偏离一律拒绝，这是刻意的：静默绕过会让门禁变成装饰。
+
+### 构建输出里的 `! [line-height] …` 之类
+
+这些是**警告**，不影响退出码，也不会拒绝构建。四条区间规则：
+
+- `line-height`：中文行距按「行盒 ÷ 字号 + leading」算出的倍数，落在 1.40–1.75 之外。只对中文判断——原则没给西文行距区间，西文直接跳过并记一条提示。
+- `measure`：每行字数，中文 25–45、西文 50–75。信函与便签这类「一次读完」的 Kind 不看这条。
+- `heading-ratio`：一级标题不到正文的 1.3 倍。
+- `heading-depth`：标题超过 4 级（围栏里的 `#####` 不算）。
+
+警告不能用偏离记录消掉，也不该消掉——按 ADR-0006，它必须写进交付时的排版方案里说明。真判断不了的时候（换了没测过的字族），构建会记一条提示并跳过，而不是猜一个数。
 
 ## 版式问题
 

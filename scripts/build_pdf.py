@@ -334,6 +334,13 @@ PRESETS: dict[str, dict[str, object]] = {
 }
 
 PAPERS = {"a4", "a5", "6x9", "letter"}
+# Paper dimensions in millimetres; the template carries the same table for Typst.
+PAPER_MM = {
+    "a4": (210.0, 297.0),
+    "a5": (148.0, 210.0),
+    "6x9": (152.4, 228.6),
+    "letter": (215.9, 279.4),
+}
 COVER_STYLES = {"band", "full", "minimal"}
 PAGE_NUMBERS = {"none", "footer-center", "footer-right", "footer-outside"}
 HEADERS = {"none", "title", "book", "chapter"}
@@ -1092,10 +1099,39 @@ def nested(flat: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # Typography principles
 # --------------------------------------------------------------------------- #
-# A rule fires on a structural contradiction: two settings whose combined effect
-# is the same as one of them, so the page reads as if neither had been decided.
-# Values that merely drift out of a comfortable band are warnings, and they come
-# with a later ticket; the gate only refuses what cannot be right.
+# Two tiers.  A structural contradiction cannot be right — two settings whose
+# combined effect is the same as one of them — so it blocks the build.  A value
+# that merely drifts out of the comfortable band is a warning: it still ships,
+# but the build says so and the layout plan has to answer for it.
+#
+# The ranges below are the principles' own numbers.  A later ticket generates the
+# published table from them, so they live here and nowhere else.
+CHINESE_LEADING = (1.40, 1.75)
+WESTERN_LEADING = (1.20, 1.45)
+CHINESE_MEASURE = (25, 45)
+WESTERN_MEASURE = (50, 75)
+
+# Typst builds the line box out of the font's own metrics.  Measured with a
+# 300 ppi probe: 8.00pt at 11pt for Noto Serif SC (0.727em), 7.24pt for
+# Libertinus (0.658em).  Those are the only two families we have numbers for;
+# anything else falls back to "cannot estimate", never to a guess.
+LINE_BOX_EM = {
+    "Noto Serif SC": 0.727,
+    "Libertinus Serif": 0.658,
+}
+# Running Latin prose averages at most 0.42em per character; the wide bound
+# keeps the estimate from flattering a narrow measure.
+WESTERN_CHAR_EM = 0.42
+
+# Kinds read in one sitting rather than continuously.  The measure band is about
+# sustained reading, so these report it as a note instead of a warning.
+SHORT_FORM_KINDS = {"letter", "note"}
+
+
+class MissingKnob(SpecError):
+    """The style does not say, as opposed to saying something unusable."""
+
+
 def _length_of(style: dict, group: str, key: str) -> float:
     """Resolve one length knob to points; `em` is relative to the body size."""
     text = style.get("text") or {}
@@ -1104,14 +1140,14 @@ def _length_of(style: dict, group: str, key: str) -> float:
         raise SpecError(f"无法解析 text.size={text.get('size')!r}，无法校验排版原则")
     raw = (style.get(group) or {}).get(key)
     if raw is None:
-        raise SpecError(f"这个 style 缺少 {group}.{key}，无法校验排版原则")
+        raise MissingKnob(f"这个 style 缺少 {group}.{key}")
     value = length_pt(raw, size)
     if value is None:
         raise SpecError(f"无法解析 {group}.{key}={raw!r}，无法校验排版原则")
     return value
 
 
-def _indent_and_spacing(style: dict) -> str | None:
+def _indent_and_spacing(style: dict, doc: dict) -> str | None:
     indent = _length_of(style, "text", "first-line-indent")
     spacing = _length_of(style, "text", "paragraph-spacing")
     if indent <= 0 or spacing <= PARAGRAPH_SPACING_FLOOR_PT + 0.01:
@@ -1124,7 +1160,7 @@ def _indent_and_spacing(style: dict) -> str | None:
     )
 
 
-def _spacing_below_leading(style: dict) -> str | None:
+def _spacing_below_leading(style: dict, doc: dict) -> str | None:
     if _length_of(style, "text", "first-line-indent") > 0:
         return None
     spacing = _length_of(style, "text", "paragraph-spacing")
@@ -1140,17 +1176,126 @@ def _spacing_below_leading(style: dict) -> str | None:
     )
 
 
+def _chinese(style: dict) -> bool:
+    """Whether the body sets Chinese; a hand-edited style may not say."""
+    return str((style.get("text") or {}).get("lang", "zh")).startswith("zh")
+
+
+def line_box_em(style: dict) -> float | None:
+    """The measured line box for this stack, or None when the stack is custom."""
+    text = style.get("text") or {}
+    fonts = text.get("font") or []
+    if isinstance(fonts, str):
+        fonts = [part.strip() for part in fonts.split(",") if part.strip()]
+    chinese = _chinese(style)
+    for font in fonts:
+        if chinese and font == "Noto Serif SC":
+            return LINE_BOX_EM[font]
+        if not chinese and font == "Libertinus Serif":
+            return LINE_BOX_EM[font]
+    return None
+
+
+def _line_height(style: dict, level: int) -> str | None:
+    # The principles only state a Chinese band; a Latin band would have to be
+    # invented, so Western prose is left alone instead of held to a guess.
+    if not _chinese(style):
+        return None
+    box = line_box_em(style)
+    if box is None:
+        return None
+    size = _length_of(style, "text", "size")
+    leading = _length_of(style, "text", "leading")
+    factor = (box * size + leading) / size
+    low, high = CHINESE_LEADING
+    if low - 0.005 <= factor <= high + 0.005:
+        return None
+    return (
+        f"行距 {factor:.2f}×（{size:g}pt 正文 + {style['text']['leading']} 行距，"
+        f"行盒 {box:.3f}em），建议 {low:.2f}–{high:.2f}×。"
+    )
+
+
+def text_width_pt(style: dict) -> float:
+    """The measure: paper width minus the inside and outside columns."""
+    page = style.get("page") or {}
+    width_mm = PAPER_MM.get(str(page.get("paper", "a4")), PAPER_MM["a4"])[0]
+    margin = _length_of(style, "page", "margin")
+    inside = margin + _length_of(style, "page", "gutter")
+    outside = margin
+    if (style.get("note") or {}).get("style") == "margin":
+        outside += _length_of(style, "note", "width") + _length_of(style, "note", "gap")
+    return width_mm / 25.4 * 72 - inside - outside
+
+
+def _measure(style: dict, level: int) -> str | None:
+    if str(style.get("kind", "")) in SHORT_FORM_KINDS:
+        return None
+    width = text_width_pt(style)
+    size = _length_of(style, "text", "size")
+    if _chinese(style):
+        chars = width / size
+        low, high, unit = *CHINESE_MEASURE, "个汉字"
+    else:
+        if line_box_em(style) is None:
+            # 0.42em is an average for the Latin faces we measured; another
+            # family can be a fifth wider, which would invent a warning.
+            return None
+        chars = width / (WESTERN_CHAR_EM * size)
+        low, high, unit = *WESTERN_MEASURE, "个字符"
+    if low <= chars <= high:
+        return None
+    return (
+        f"每行约 {chars:.0f} {unit}（版心 {width / 72 * 2.54:.1f}cm ÷ {size:g}pt），"
+        f"建议 {low}–{high}。"
+    )
+
+
+def _heading_ratio(style: dict, level: int) -> str | None:
+    size = _length_of(style, "text", "size")
+    head = _length_of(style, "heading", "size-1")
+    ratio = head / size
+    if ratio >= 1.3 - 1e-9:
+        return None
+    return f"一级标题 {head:g}pt ÷ 正文 {size:g}pt = {ratio:.2f}，建议 ≥ 1.3。"
+
+
+def _heading_depth(style: dict, level: int) -> str | None:
+    if level <= 4:
+        return None
+    return f"文档有 {level} 级标题，建议不超过 4 级——层级太多等于没有层级。"
+
+
 PRINCIPLE_RULES = (
-    ("indent-and-spacing", _indent_and_spacing),
-    ("spacing-below-leading", _spacing_below_leading),
+    ("indent-and-spacing", "error", _indent_and_spacing),
+    ("spacing-below-leading", "error", _spacing_below_leading),
+    ("line-height", "warning", _line_height),
+    ("measure", "warning", _measure),
+    ("heading-ratio", "warning", _heading_ratio),
+    ("heading-depth", "warning", _heading_depth),
 )
+RULE_SEVERITY = {rule: severity for rule, severity, _ in PRINCIPLE_RULES}
+ERROR_RULES = {rule for rule, severity in RULE_SEVERITY.items() if severity == "error"}
+
+
+def heading_depth(text: str) -> int:
+    """Deepest heading in a Markdown source or in a generated `.typ`."""
+    prose = prose_only(text)
+    levels = [len(m.group(1)) for m in re.finditer(r"^(#{1,6})\s+\S", prose, re.M)]
+    levels += [len(m.group(1)) for m in re.finditer(r"^(=+)\s+\S", prose, re.M)]
+    return max(levels, default=0)
 
 
 def _deviation_record(rule: str, reason: str, source: str) -> dict:
     """One validated deviation; the single place its shape is decided."""
-    known = {name for name, _ in PRINCIPLE_RULES}
-    if rule not in known:
-        raise SpecError(f"未知的偏离规则 {rule!r}，可用：{', '.join(sorted(known))}")
+    severity = RULE_SEVERITY.get(rule)
+    if severity is None:
+        raise SpecError(f"未知的偏离规则 {rule!r}，可用：{', '.join(sorted(ERROR_RULES))}")
+    if severity != "error":
+        raise SpecError(
+            f"{rule} 只产生警告、不阻断构建，不需要偏离记录；"
+            "把这条警告写进交付的排版方案里说明即可"
+        )
     if source not in ("user", "standard"):
         raise SpecError(
             f"偏离记录 {rule} 的 source 只能是 user（用户授权）"
@@ -1195,12 +1340,37 @@ def deviations_from_typ(text: str) -> dict:
     return deviations_of({"deviations": raw})
 
 
-def check_principles(style: dict, deviations: dict, notes: list[str] | None = None) -> None:
-    """Refuse a self-contradicting style; announce any deviation that waived it."""
+def check_principles(style: dict, deviations: dict, *, max_heading_level: int | None = None,
+                     notes: list[str] | None = None,
+                     warnings: list[str] | None = None) -> None:
+    """Refuse a self-contradicting style; report the values that drift.
+
+    Errors raise; warnings are appended to `warnings` and never stop a build.
+    A deviation only ever waives an error — a warning is not something to buy
+    your way out of, it is something the layout plan has to answer for.
+    """
+    level = int(max_heading_level or 0)
+    chinese = _chinese(style)
+    if notes is not None:
+        if not chinese:
+            notes.append("原则只给了中文行距区间，西文跳过 line-height")
+        if line_box_em(style) is None:
+            skipped = "行距倍数" if chinese else "每行字符数"
+            notes.append(f"字族不在实测范围内，{skipped}只能粗估，已跳过")
     problems = []
-    for rule, check in PRINCIPLE_RULES:
-        hint = check(style)
+    for rule, severity, check in PRINCIPLE_RULES:
+        try:
+            hint = check(style, level)
+        except MissingKnob as exc:
+            # A hand-edited style may simply not say; that is not a violation.
+            if notes is not None:
+                notes.append(f"{rule} 无法判断：{exc}")
+            continue
         if hint is None:
+            continue
+        if severity == "warning":
+            if warnings is not None:
+                warnings.append(f"[{rule}] {hint}")
             continue
         record = deviations.get(rule)
         if record:
@@ -1220,6 +1390,9 @@ def check_principles(style: dict, deviations: dict, notes: list[str] | None = No
 
 def _typst_scalar(raw: str):
     """Undo the literal quoting `compose` applies to a style value."""
+    if raw.startswith("(") and raw.endswith(")"):
+        inner = raw[1:-1]
+        return [part.strip().strip('"') for part in inner.split(",") if part.strip()]
     if raw.startswith('"') and raw.endswith('"'):
         return raw[1:-1]
     if raw in ("true", "false"):
@@ -1723,7 +1896,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
                           has_bibliography=bib_path is not None,
                           has_sidenotes=has_notes)
     deviations = deviations_of(doc_spec)
-    check_principles(style, deviations, notes)
+    principle_warnings: list[str] = []
     # Footnotes only reach the margin when margin mode is on, so they only need
     # checking then.
     _, long_notes, crowded = inspect_sidenotes(
@@ -1739,11 +1912,15 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         root = root_from_typ(typ_path)
         diagram_warnings: list[str] = []
         # The reused file may have been hand-edited since it was generated, so
-        # the gate has to read what it actually says, not just the spec.
+        # the gate reads what it actually says, not the spec it came from.
         reused = typ_path.read_text(encoding="utf-8")
         check_principles(parse_style_literal(reused),
-                         {**deviations, **deviations_from_typ(reused)}, notes)
+                         {**deviations, **deviations_from_typ(reused)},
+                         max_heading_level=heading_depth(reused),
+                         notes=notes, warnings=principle_warnings)
     else:
+        check_principles(style, deviations, max_heading_level=heading_depth(source_text),
+                         notes=notes, warnings=principle_warnings)
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
         diagram_filter, diagram_warnings = prepare_diagrams(inputs, first.parent)
@@ -1789,7 +1966,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
                 deviations=deviations)
 
     proc = run(["typst", "compile", *typst_args(root), str(typ_path), str(out_pdf)], check=False)
-    warnings = parse_warnings(proc.stderr)
+    warnings = list(dict.fromkeys(principle_warnings + parse_warnings(proc.stderr)))
     warnings.extend(diagram_warnings)
     if proc.returncode != 0:
         raise SpecError(f"Typst 编译失败：\n{proc.stderr.strip()}")
@@ -1932,13 +2109,18 @@ def cmd_style(args) -> int:
     lang = detect_lang(source_text)
     has_notes, _, _ = inspect_sidenotes(source_text)
     notes: list[str] = []
+    warnings: list[str] = []
     style = resolve_style(str(kind), doc_spec, args.set or [], lang, notes,
                           has_bibliography=bibliography_field(fm) != "",
                           has_sidenotes=has_notes)
-    check_principles(style, deviations_of(doc_spec), notes)
-    # Notes go to stderr: stdout is the spec itself, and people pipe it.
+    check_principles(style, deviations_of(doc_spec),
+                     max_heading_level=heading_depth(source_text),
+                     notes=notes, warnings=warnings)
+    # Notes and warnings go to stderr: stdout is the spec itself, and people pipe it.
     for note in notes:
         print(f"i     {note}", file=sys.stderr)
+    for warning in warnings:
+        print(f"!     {warning}", file=sys.stderr)
     text = to_yaml(style)
     if args.write:
         target = Path(args.write)
@@ -2039,17 +2221,20 @@ def cmd_check(args) -> int:
     # deviations come from the .typ itself, falling back to an adjacent doc.yml
     # for files generated before the header carried them.
     notes: list[str] = []
+    gate_warnings: list[str] = []
     text = typ.read_text(encoding="utf-8")
     sidecar = typ.with_suffix(".doc.yml")
     declared = deviations_of(
         parse_simple_yaml(sidecar.read_text(encoding="utf-8")) if sidecar.exists() else {}
     )
     check_principles(parse_style_literal(text),
-                     {**declared, **deviations_from_typ(text)}, notes)
+                     {**declared, **deviations_from_typ(text)},
+                     max_heading_level=heading_depth(text),
+                     notes=notes, warnings=gate_warnings)
     root = root_from_typ(typ)
     proc = run(["typst", "compile", *typst_args(root), str(typ), str(typ.with_suffix(".pdf"))],
                check=False)
-    warnings = parse_warnings(proc.stderr)
+    warnings = list(dict.fromkeys(gate_warnings + parse_warnings(proc.stderr)))
     if proc.returncode != 0:
         print(proc.stderr.strip(), file=sys.stderr)
         return 1

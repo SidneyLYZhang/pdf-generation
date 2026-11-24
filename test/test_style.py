@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 import unittest
@@ -204,16 +205,20 @@ class ResolveStyleTests(unittest.TestCase):
 
 
 class PrincipleCheckTests(unittest.TestCase):
-    def check(self, kind: str, *sets: str) -> list[str]:
+    def check(self, kind: str, *sets: str, level: int = 0,
+              lang: str = "zh") -> tuple[list[str], list[str]]:
         notes: list[str] = []
-        style = bp.resolve_style(kind, {}, list(sets), "zh", notes)
-        bp.check_principles(style, {}, notes)
-        return notes
+        warnings: list[str] = []
+        style = bp.resolve_style(kind, {}, list(sets), lang, notes)
+        bp.check_principles(style, {}, max_heading_level=level, notes=notes, warnings=warnings)
+        return notes, warnings
 
     def test_defaults_pass_every_rule(self):
-        for kind in bp.KINDS:
-            with self.subTest(kind=kind):
-                self.check(kind)
+        for lang in ("zh", "en"):
+            for kind in bp.KINDS:
+                with self.subTest(kind=kind, lang=lang):
+                    _, warnings = self.check(kind, level=3, lang=lang)
+                    self.assertEqual(warnings, [])
 
     def test_indent_with_visible_spacing_is_refused(self):
         with self.assertRaises(bp.SpecError) as caught:
@@ -232,11 +237,102 @@ class PrincipleCheckTests(unittest.TestCase):
         bp.check_principles(
             style,
             {"indent-and-spacing": {"source": "standard", "reason": "期刊模板要求段间空一行"}},
-            notes,
+            notes=notes,
         )
-        self.assertEqual(len(notes), 1)
         self.assertIn("已放行偏离 indent-and-spacing", notes[0])
         self.assertIn("机构规范", notes[0])
+
+    def test_line_height_outside_the_band_is_a_warning(self):
+        notes, warnings = self.check("report", "text.leading=0.55em")
+        self.assertEqual(notes, [])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("[line-height]", warnings[0])
+        self.assertIn("1.28×", warnings[0])
+        low, high = bp.CHINESE_LEADING
+        self.assertIn(f"{low:.2f}–{high:.2f}×", warnings[0])
+
+    def test_western_prose_is_not_held_to_the_chinese_band(self):
+        notes, warnings = self.check("report", "text.leading=0.55em", lang="en")
+        self.assertEqual(warnings, [])
+        self.assertTrue(any("西文跳过 line-height" in note for note in notes))
+
+    def test_unknown_font_stack_degrades_to_a_note(self):
+        notes, warnings = self.check(
+            "report", 'text.font=["Noto Sans SC"]', "text.leading=0.55em"
+        )
+        self.assertEqual(warnings, [])
+        self.assertTrue(any("字族不在实测范围内" in note for note in notes))
+
+    def test_measure_outside_the_band_is_a_warning(self):
+        _, warnings = self.check("report", "text.size=8pt")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("[measure]", warnings[0])
+        low, high = bp.CHINESE_MEASURE
+        self.assertIn(f"{low}–{high}", warnings[0])
+
+    def test_short_form_kinds_are_exempt_from_the_measure_band(self):
+        # A letter is read in one sitting; 88 characters a line is not a defect.
+        for kind in ("letter", "note"):
+            with self.subTest(kind=kind):
+                _, warnings = self.check(kind, "page.margin=1cm", lang="en")
+                self.assertEqual(warnings, [])
+
+    def test_english_measure_outside_the_band_is_a_warning(self):
+        _, warnings = self.check("report", "page.margin=1cm", lang="en")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("[measure]", warnings[0])
+        low, high = bp.WESTERN_MEASURE
+        self.assertIn(f"{low}–{high}", warnings[0])
+
+    def test_heading_ratio_below_one_third_is_a_warning(self):
+        _, warnings = self.check("report", "heading.size-1=13pt")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("[heading-ratio]", warnings[0])
+        self.assertIn("1.18", warnings[0])
+
+    def test_heading_depth_over_four_is_a_warning(self):
+        _, warnings = self.check("report", level=5)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("[heading-depth]", warnings[0])
+        self.assertIn("5 级", warnings[0])
+
+    def test_heading_depth_at_four_is_fine(self):
+        _, warnings = self.check("report", level=4)
+        self.assertEqual(warnings, [])
+
+    def test_heading_depth_ignores_headings_inside_code_fences(self):
+        text = "# 一\n\n```markdown\n##### 这是示例，不是标题\n```\n\n## 二\n"
+        self.assertEqual(bp.heading_depth(text), 2)
+
+    def test_heading_depth_reads_both_markdown_and_typst_markup(self):
+        self.assertEqual(bp.heading_depth("# 一\n\n### 三\n"), 3)
+        self.assertEqual(bp.heading_depth("= 一\n\n=== 三\n"), 3)
+        self.assertEqual(bp.heading_depth("正文，没有标题。\n"), 0)
+
+    def test_warning_rule_cannot_be_bought_off_with_a_deviation(self):
+        with self.assertRaises(bp.SpecError) as caught:
+            bp.deviations_of(
+                {"deviations": {"line-height": {"source": "user", "reason": "就这样"}}}
+            )
+        self.assertIn("写进交付的排版方案", str(caught.exception))
+
+    def test_paper_sizes_match_the_template(self):
+        # The measure estimate needs its own table, but two copies drift: the
+        # template's paper-table is the one Typst actually lays out with.
+        source = (ROOT / "template" / "00-util.typ").read_text(encoding="utf-8")
+        found = {}
+        for name, width, unit_w, height, unit_h in re.findall(
+            r'^\s+"?([\w]+)"?: \(width: ([\d.]+)(mm|in), height: ([\d.]+)(mm|in)',
+            source,
+            re.M,
+        ):
+            scale = {"mm": 1.0, "in": 25.4}
+            found[name] = (float(width) * scale[unit_w], float(height) * scale[unit_h])
+        self.assertEqual(set(found), set(bp.PAPER_MM))
+        for name, (width, height) in bp.PAPER_MM.items():
+            with self.subTest(paper=name):
+                self.assertAlmostEqual(found[name][0], width, places=1)
+                self.assertAlmostEqual(found[name][1], height, places=1)
 
     def test_deviation_must_name_a_known_rule(self):
         with self.assertRaises(bp.SpecError):
@@ -260,6 +356,7 @@ class PrincipleCheckTests(unittest.TestCase):
             "  margin: 2.5cm,\n"
             "),\n"
             "  text: (\n"
+            '  font: ("Libertinus Serif", "Noto Serif SC",),\n'
             "  size: 11pt,\n"
             "  leading: 0.75em,\n"
             "  paragraph-spacing: 6pt,\n"
@@ -273,6 +370,7 @@ class PrincipleCheckTests(unittest.TestCase):
         )
         style = bp.parse_style_literal(text)
         self.assertEqual(style["page"]["paper"], "a4")
+        self.assertEqual(style["text"]["font"], ["Libertinus Serif", "Noto Serif SC"])
         self.assertEqual(style["text"]["paragraph-spacing"], "6pt")
         self.assertIs(style["text"]["justify"], True)
         # 6pt is tighter than the 8.25pt leading, so the .typ is refused too.
