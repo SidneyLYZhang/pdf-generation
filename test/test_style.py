@@ -203,6 +203,122 @@ class ResolveStyleTests(unittest.TestCase):
         self.assertEqual(by_doc["page"]["margin"], "3cm")
 
 
+class PrincipleCheckTests(unittest.TestCase):
+    def check(self, kind: str, *sets: str) -> list[str]:
+        notes: list[str] = []
+        style = bp.resolve_style(kind, {}, list(sets), "zh", notes)
+        bp.check_principles(style, {}, notes)
+        return notes
+
+    def test_defaults_pass_every_rule(self):
+        for kind in bp.KINDS:
+            with self.subTest(kind=kind):
+                self.check(kind)
+
+    def test_indent_with_visible_spacing_is_refused(self):
+        with self.assertRaises(bp.SpecError) as caught:
+            self.check("book", "text.paragraph-spacing=8pt")
+        self.assertIn("indent-and-spacing", str(caught.exception))
+        self.assertIn("改法", str(caught.exception))
+
+    def test_tight_spacing_without_indent_is_refused(self):
+        with self.assertRaises(bp.SpecError) as caught:
+            self.check("report", "text.paragraph-spacing=6pt")
+        self.assertIn("spacing-below-leading", str(caught.exception))
+
+    def test_deviation_waives_the_rule_and_is_announced(self):
+        style = bp.resolve_style("book", {}, ["text.paragraph-spacing=8pt"], "zh")
+        notes: list[str] = []
+        bp.check_principles(
+            style,
+            {"indent-and-spacing": {"source": "standard", "reason": "期刊模板要求段间空一行"}},
+            notes,
+        )
+        self.assertEqual(len(notes), 1)
+        self.assertIn("已放行偏离 indent-and-spacing", notes[0])
+        self.assertIn("机构规范", notes[0])
+
+    def test_deviation_must_name_a_known_rule(self):
+        with self.assertRaises(bp.SpecError):
+            bp.deviations_of({"deviations": {"no-such-rule": {"source": "user", "reason": "x"}}})
+
+    def test_deviation_must_carry_a_reason(self):
+        with self.assertRaises(bp.SpecError):
+            bp.deviations_of({"deviations": {"indent-and-spacing": {"source": "user", "reason": " "}}})
+
+    def test_deviation_source_is_checked(self):
+        with self.assertRaises(bp.SpecError):
+            bp.deviations_of(
+                {"deviations": {"indent-and-spacing": {"source": "同事", "reason": "说好的"}}}
+            )
+
+    def test_style_literal_is_read_back_from_generated_typst(self):
+        text = (
+            "#let style = (\n"
+            "  page: (\n"
+            '  paper: "a4",\n'
+            "  margin: 2.5cm,\n"
+            "),\n"
+            "  text: (\n"
+            "  size: 11pt,\n"
+            "  leading: 0.75em,\n"
+            "  paragraph-spacing: 6pt,\n"
+            "  first-line-indent: 0em,\n"
+            "  justify: true,\n"
+            "),\n"
+            "  heading: (\n"
+            "  size-1: 22pt,\n"
+            "),\n"
+            ")\n"
+        )
+        style = bp.parse_style_literal(text)
+        self.assertEqual(style["page"]["paper"], "a4")
+        self.assertEqual(style["text"]["paragraph-spacing"], "6pt")
+        self.assertIs(style["text"]["justify"], True)
+        # 6pt is tighter than the 8.25pt leading, so the .typ is refused too.
+        with self.assertRaises(bp.SpecError):
+            bp.check_principles(style, {})
+
+    def test_style_literal_without_a_style_block_is_refused(self):
+        with self.assertRaises(bp.SpecError) as caught:
+            bp.parse_style_literal("// 手写的文件\n")
+        self.assertIn("typst compile", str(caught.exception))
+
+    def test_unreadable_length_is_refused_rather_than_read_as_zero(self):
+        # `2ch` has no point equivalent here; reading it as 0 would look like
+        # "no indent" and quietly pass the very rule that should fire.
+        text = (
+            "#let style = (\n  text: (\n  size: 11pt,\n  leading: 0.75em,\n"
+            "  paragraph-spacing: 1em,\n  first-line-indent: 2ch,\n),\n)\n"
+        )
+        with self.assertRaises(bp.SpecError) as caught:
+            bp.check_principles(bp.parse_style_literal(text), {})
+        self.assertIn("first-line-indent", str(caught.exception))
+
+    def test_deviation_written_into_the_typ_header_is_honoured(self):
+        text = (
+            '#let style = (\n  text: (\n  size: 11pt,\n  leading: 0.75em,\n'
+            "  paragraph-spacing: 6pt,\n  first-line-indent: 0em,\n),\n)\n"
+            '// pdfgen-deviation: {"rule": "spacing-below-leading", "source": "user", '
+            '"reason": "客户模板要求段间不留空隙"}\n'
+        )
+        declared = bp.deviations_from_typ(text)
+        self.assertEqual(declared["spacing-below-leading"]["reason"], "客户模板要求段间不留空隙")
+        bp.check_principles(bp.parse_style_literal(text), declared)
+
+    def test_two_rule_hints_do_not_send_the_reader_in_a_circle(self):
+        # Each hint has to name a path that satisfies the other rule as well:
+        # the indent rule offers the floor, the spacing rule offers a taller gap
+        # and says what to do with the indent if the reader picks that way.
+        with self.assertRaises(bp.SpecError) as caught:
+            self.check("report", "text.paragraph-spacing=6pt")
+        self.assertIn("提到", str(caught.exception))
+        self.assertIn(f"降回 {bp.PARAGRAPH_SPACING_FLOOR}", str(caught.exception))
+        with self.assertRaises(bp.SpecError) as caught:
+            self.check("book", "text.paragraph-spacing=8pt")
+        self.assertIn(f"降到 {bp.PARAGRAPH_SPACING_FLOOR}", str(caught.exception))
+
+
 class CitationStyleTests(unittest.TestCase):
     def test_style_defaults_follow_language_and_kind(self):
         self.assertEqual(bp.resolve_style("report", {}, [], "zh")["cite"]["style"],

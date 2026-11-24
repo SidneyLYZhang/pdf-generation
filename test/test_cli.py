@@ -1063,6 +1063,165 @@ class ChessTests(unittest.TestCase):
         self.assertIn("--package-path", typ.split("#show: doc.with")[0])
 
 
+@unittest.skipUnless(HAVE_DEPS, "需要 typst 与 pandoc")
+class PrincipleGateTests(unittest.TestCase):
+    """The gate refuses a self-contradicting style unless the deviation is on disk."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix=".pdfgen-gate-", dir=str(ROOT)))
+        self.doc = self.tmp / "gate.md"
+        self.doc.write_text("# 校验\n\n第一段文字。\n\n第二段文字。\n", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def build(self, *extra: str) -> tuple[int, str, str]:
+        out = self.tmp / "gate.pdf"
+        return run_cli(["build", str(self.doc), "-o", str(out), "--check", "none", *extra])
+
+    VIOLATING = ("--kind", "book", "--set", "text.paragraph-spacing=8pt")
+    DEVIATION = "indent-and-spacing=期刊模板要求段间空一行"
+
+    def test_indent_with_visible_spacing_is_refused(self):
+        code, _, err = self.build(*self.VIOLATING)
+        self.assertEqual(code, 1)
+        self.assertIn("indent-and-spacing", err)
+        self.assertIn("改法", err)
+
+    def test_tight_spacing_is_refused(self):
+        code, _, err = self.build("--set", "text.paragraph-spacing=6pt")
+        self.assertEqual(code, 1)
+        self.assertIn("spacing-below-leading", err)
+
+    def test_style_command_runs_the_same_check(self):
+        code, _, err = run_cli(["style", str(self.doc), "--set", "text.paragraph-spacing=6pt"])
+        self.assertEqual(code, 1)
+        self.assertIn("spacing-below-leading", err)
+
+    def test_style_command_keeps_the_clamp_note(self):
+        code, out, err = run_cli(
+            ["style", str(self.doc), "--kind", "book", "--set", "text.paragraph-spacing=2pt"]
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn(f"低于 {bp.PARAGRAPH_SPACING_FLOOR}", err)
+        self.assertIn(f"paragraph-spacing: {bp.PARAGRAPH_SPACING_FLOOR}", out)
+
+    def test_exporting_the_spec_keeps_the_deviation_record(self):
+        code, _, err = self.build(*self.VIOLATING, "--deviation", self.DEVIATION)
+        self.assertEqual(code, 0, err)
+        code, _, err = run_cli(
+            ["style", str(self.doc), "--kind", "book", "--write", str(self.tmp / "gate.doc.yml")]
+        )
+        self.assertEqual(code, 0, err)
+        text = (self.tmp / "gate.doc.yml").read_text(encoding="utf-8")
+        self.assertIn("deviations:", text)
+        self.assertIn("期刊模板要求段间空一行", text)
+        # The exported spec still builds: the record survived the round trip.
+        code, _, err = self.build(*self.VIOLATING)
+        self.assertEqual(code, 0, err)
+
+    def test_deviation_flag_writes_the_record(self):
+        code, out, err = self.build(*self.VIOLATING, "--deviation", self.DEVIATION)
+        self.assertEqual(code, 0, err)
+        self.assertIn("已放行偏离", out)
+        spec = self.tmp / "gate.doc.yml"
+        self.assertIn("indent-and-spacing", spec.read_text(encoding="utf-8"))
+        self.assertIn("reason", spec.read_text(encoding="utf-8"))
+
+    def test_the_file_exempts_not_the_flag(self):
+        code, _, err = self.build(*self.VIOLATING, "--deviation", self.DEVIATION)
+        self.assertEqual(code, 0, err)
+        # Second run without the flag still passes: the record lives in the file.
+        code, out, err = self.build(*self.VIOLATING)
+        self.assertEqual(code, 0, err)
+        self.assertIn("已放行偏离", out)
+        # Remove the file and the very same spec is refused again.
+        (self.tmp / "gate.doc.yml").unlink()
+        code, _, err = self.build(*self.VIOLATING)
+        self.assertEqual(code, 1)
+        self.assertIn("indent-and-spacing", err)
+
+    def test_existing_typ_path_is_gated_too(self):
+        code, _, err = self.build(*self.VIOLATING, "--deviation", self.DEVIATION)
+        self.assertEqual(code, 0, err)
+        typ = self.tmp / "gate.typ"
+        text = typ.read_text(encoding="utf-8")
+        stripped = "\n".join(
+            line for line in text.splitlines() if not line.startswith("// pdfgen-deviation:")
+        )
+        self.assertNotEqual(stripped, text)
+        typ.write_text(stripped, encoding="utf-8")
+        (self.tmp / "gate.doc.yml").unlink()
+        code, _, err = run_cli(["build", str(typ), "--check", "none"])
+        self.assertEqual(code, 1)
+        self.assertIn("indent-and-spacing", err)
+
+    def test_unknown_deviation_rule_is_refused(self):
+        code, _, err = self.build("--deviation", "no-such-rule=理由")
+        self.assertEqual(code, 1)
+        self.assertIn("未知的偏离规则", err)
+
+    def test_deviation_without_a_reason_is_refused(self):
+        code, _, err = self.build("--deviation", "indent-and-spacing=")
+        self.assertEqual(code, 1)
+        self.assertIn("必须写明原因", err)
+
+    def test_institutional_deviation_is_recorded_as_standard(self):
+        code, out, err = self.build(
+            *self.VIOLATING, "--deviation", self.DEVIATION, "--deviation-source", "standard"
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("机构规范", out)
+        spec = self.tmp / "gate.doc.yml"
+        self.assertIn("source: standard", spec.read_text(encoding="utf-8"))
+
+    def test_writing_a_deviation_keeps_the_rest_of_the_spec_file(self):
+        spec = self.tmp / "gate.doc.yml"
+        spec.write_text("# 客户模板要求\nstyle:\n  text:\n    size: 11pt\n", encoding="utf-8")
+        code, _, err = self.build("--deviation", self.DEVIATION)
+        self.assertEqual(code, 0, err)
+        text = spec.read_text(encoding="utf-8")
+        self.assertIn("# 客户模板要求", text)
+        self.assertIn("size: 11pt", text)
+        self.assertIn("deviations:", text)
+
+    def test_typ_keeps_its_deviation_when_moved(self):
+        out = self.tmp / "sub" / "renamed.pdf"
+        code, _, err = run_cli([
+            "build", str(self.doc), "-o", str(out), "--check", "none",
+            *self.VIOLATING, "--deviation", self.DEVIATION,
+        ])
+        self.assertEqual(code, 0, err)
+        # No doc.yml beside the renamed .typ; the header carries the record.
+        self.assertFalse(out.with_suffix(".doc.yml").exists())
+        code, _, err = run_cli(["build", str(out.with_suffix(".typ")), "--check", "none"])
+        self.assertEqual(code, 0, err)
+
+    def test_keep_typ_rechecks_the_reused_file(self):
+        code, _, err = self.build("--kind", "book")
+        self.assertEqual(code, 0, err)
+        typ = self.tmp / "gate.typ"
+        text = typ.read_text(encoding="utf-8")
+        edited = text.replace(
+            f"paragraph-spacing: {bp.PARAGRAPH_SPACING_FLOOR},", "paragraph-spacing: 8pt,", 1
+        )
+        self.assertNotEqual(edited, text)
+        typ.write_text(edited, encoding="utf-8")
+        code, _, err = self.build("--kind", "book", "--keep-typ")
+        self.assertEqual(code, 1)
+        self.assertIn("indent-and-spacing", err)
+
+    def test_deviation_on_a_typ_input_is_refused(self):
+        code, _, err = self.build("--kind", "book")
+        self.assertEqual(code, 0, err)
+        code, _, err = run_cli([
+            "build", str(self.tmp / "gate.typ"), "--check", "none",
+            "--deviation", self.DEVIATION,
+        ])
+        self.assertEqual(code, 1)
+        self.assertIn("不接受 --deviation", err)
+
+
 if __name__ == "__main__":
     unittest.main()
 

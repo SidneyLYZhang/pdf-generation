@@ -154,6 +154,16 @@ KNOBS: dict[str, tuple[str, object]] = {
     "novel.chapter-prefix": ("bool", "auto"),
 }
 
+# Typst 0.15 misplaces the line after a paragraph once the spacing drops below
+# ~4.5pt, so this is both the clamp floor and the point where an indent stops
+# counting as the only paragraph separator.
+PARAGRAPH_SPACING_FLOOR_PT = 4.5
+PARAGRAPH_SPACING_FLOOR = f"{PARAGRAPH_SPACING_FLOOR_PT:g}pt"
+
+# Deviations travel inside the generated .typ as well as in doc.yml, so a moved
+# or renamed intermediate still explains its own exception.
+DEVIATION_MARKER = "// pdfgen-deviation: "
+
 PALETTES: dict[str, dict[str, str]] = {
     "teal": {
         "accent": "#22645E",
@@ -928,7 +938,7 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
     if isinstance(style_block, dict):
         flatten("", style_block, entries)
     groups = {path.split(".")[0] for path in KNOBS}
-    metadata_keys = ("title", "subtitle", "author", "authors", "date", "org")
+    metadata_keys = ("title", "subtitle", "author", "authors", "date", "org", "deviations")
     for key, value in spec.items():
         if key in metadata_keys:
             continue
@@ -1036,7 +1046,8 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
     flat["text.paragraph-spacing"] = spacing
     if clamped and notes is not None:
         notes.append(
-            f"段距 {original_spacing} 低于 4.5pt，已抬到 4.5pt（Typst 0.15 会压字）"
+            f"段距 {original_spacing} 低于 {PARAGRAPH_SPACING_FLOOR}，"
+            f"已抬到 {PARAGRAPH_SPACING_FLOOR}（Typst 0.15 会压字）"
         )
 
     return nested(flat)
@@ -1062,8 +1073,8 @@ def length_pt(value: str, font_pt: float) -> float | None:
 def clamp_paragraph_spacing(spacing: str, font_size: str) -> tuple[str, bool]:
     font_pt = length_pt(font_size, 10.0) or 10.0
     spacing_pt = length_pt(spacing, font_pt)
-    if spacing_pt is not None and spacing_pt < 4.5:
-        return "4.5pt", True
+    if spacing_pt is not None and spacing_pt < PARAGRAPH_SPACING_FLOOR_PT:
+        return PARAGRAPH_SPACING_FLOOR, True
     return spacing, False
 
 
@@ -1076,6 +1087,182 @@ def nested(flat: dict) -> dict:
             cur = cur.setdefault(part, {})
         cur[parts[-1]] = value
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Typography principles
+# --------------------------------------------------------------------------- #
+# A rule fires on a structural contradiction: two settings whose combined effect
+# is the same as one of them, so the page reads as if neither had been decided.
+# Values that merely drift out of a comfortable band are warnings, and they come
+# with a later ticket; the gate only refuses what cannot be right.
+def _length_of(style: dict, group: str, key: str) -> float:
+    """Resolve one length knob to points; `em` is relative to the body size."""
+    text = style.get("text") or {}
+    size = length_pt(text.get("size", "11pt"), 11.0)
+    if size is None:
+        raise SpecError(f"无法解析 text.size={text.get('size')!r}，无法校验排版原则")
+    raw = (style.get(group) or {}).get(key)
+    if raw is None:
+        raise SpecError(f"这个 style 缺少 {group}.{key}，无法校验排版原则")
+    value = length_pt(raw, size)
+    if value is None:
+        raise SpecError(f"无法解析 {group}.{key}={raw!r}，无法校验排版原则")
+    return value
+
+
+def _indent_and_spacing(style: dict) -> str | None:
+    indent = _length_of(style, "text", "first-line-indent")
+    spacing = _length_of(style, "text", "paragraph-spacing")
+    if indent <= 0 or spacing <= PARAGRAPH_SPACING_FLOOR_PT + 0.01:
+        return None
+    return (
+        f"段首缩进 {style['text']['first-line-indent']} 与段距 "
+        f"{style['text']['paragraph-spacing']} 同时在用，分段手段重复。\n"
+        f"  改法：把 text.paragraph-spacing 降到 {PARAGRAPH_SPACING_FLOOR}（Typst 的下限），"
+        "让缩进独自承担分段。"
+    )
+
+
+def _spacing_below_leading(style: dict) -> str | None:
+    if _length_of(style, "text", "first-line-indent") > 0:
+        return None
+    spacing = _length_of(style, "text", "paragraph-spacing")
+    leading = _length_of(style, "text", "leading")
+    if spacing > leading + 0.01:
+        return None
+    return (
+        f"没有首行缩进，段距 {spacing:.2f}pt 却不大于行距间隙 {leading:.2f}pt，"
+        "段落之间看不出分隔。\n"
+        f"  改法：把 text.paragraph-spacing 提到 {leading + 2:.1f}pt 以上；"
+        f"若想让缩进承担分段，就给 text.first-line-indent 一个非零值，"
+        f"并把段距降回 {PARAGRAPH_SPACING_FLOOR}。"
+    )
+
+
+PRINCIPLE_RULES = (
+    ("indent-and-spacing", _indent_and_spacing),
+    ("spacing-below-leading", _spacing_below_leading),
+)
+
+
+def _deviation_record(rule: str, reason: str, source: str) -> dict:
+    """One validated deviation; the single place its shape is decided."""
+    known = {name for name, _ in PRINCIPLE_RULES}
+    if rule not in known:
+        raise SpecError(f"未知的偏离规则 {rule!r}，可用：{', '.join(sorted(known))}")
+    if source not in ("user", "standard"):
+        raise SpecError(
+            f"偏离记录 {rule} 的 source 只能是 user（用户授权）"
+            f"或 standard（机构规范），收到 {source!r}"
+        )
+    reason = reason.strip()
+    if not reason:
+        raise SpecError(f"偏离记录 {rule} 必须写明原因——没写理由的偏离就是静默绕过")
+    return {"source": source, "reason": reason}
+
+
+def deviations_of(doc_spec: dict) -> dict[str, dict]:
+    """Read and validate the `deviations:` block: rule id → {source, reason}."""
+    raw = doc_spec.get("deviations") or {}
+    if not isinstance(raw, dict):
+        raise SpecError("doc.yml 的 deviations 需要是映射：规则标识 → {source, reason}")
+    out: dict[str, dict] = {}
+    for rule, record in raw.items():
+        if not isinstance(record, dict):
+            raise SpecError(f"偏离记录 {rule} 需要同时写明 source 与 reason")
+        out[rule] = _deviation_record(
+            rule, str(record.get("reason", "")), str(record.get("source", ""))
+        )
+    return out
+
+
+def deviations_from_typ(text: str) -> dict:
+    """Deviations a generated `.typ` carries in its own header.
+
+    Keeping them in the file, rather than only beside it, means a `.typ` that
+    was moved or renamed still explains why it is allowed to look like that.
+    """
+    raw: dict = {}
+    for line in text.splitlines():
+        if not line.startswith(DEVIATION_MARKER):
+            continue
+        try:
+            record = json.loads(line[len(DEVIATION_MARKER):])
+            raw[str(record["rule"])] = {"source": record["source"], "reason": record["reason"]}
+        except (ValueError, KeyError, TypeError):
+            raise SpecError(f".typ 头部的偏离记录无法解析：{line!r}")
+    return deviations_of({"deviations": raw})
+
+
+def check_principles(style: dict, deviations: dict, notes: list[str] | None = None) -> None:
+    """Refuse a self-contradicting style; announce any deviation that waived it."""
+    problems = []
+    for rule, check in PRINCIPLE_RULES:
+        hint = check(style)
+        if hint is None:
+            continue
+        record = deviations.get(rule)
+        if record:
+            if notes is not None:
+                who = "机构规范" if record["source"] == "standard" else "用户授权"
+                notes.append(f"已放行偏离 {rule}（{who}）：{record['reason']}")
+            continue
+        problems.append(f"[{rule}] {hint}")
+    if problems:
+        raise SpecError(
+            "排版原则校验未通过：\n"
+            + "\n".join(problems)
+            + "\n\n若这是机构规范或用户明确要求，把偏离写进 doc.yml"
+            "（build 时可用 --deviation 规则=原因 写入），不要静默绕过。"
+        )
+
+
+def _typst_scalar(raw: str):
+    """Undo the literal quoting `compose` applies to a style value."""
+    if raw.startswith('"') and raw.endswith('"'):
+        return raw[1:-1]
+    if raw in ("true", "false"):
+        return raw == "true"
+    return raw
+
+
+def parse_style_literal(text: str) -> dict:
+    """Read the resolved style back out of a generated `.typ`.
+
+    `build x.typ` never sees a spec, so the only way to hold that path to the
+    same rules is to read the `#let style = (...)` block the template embeds.
+    Hand-edited values come back too, which is the point.
+    """
+    start = text.find("#let style = (")
+    if start < 0:
+        raise SpecError(
+            "这个 .typ 里没有 #let style 定义，无法校验排版原则。\n"
+            "  手写的 .typ 请改用 build 从 Markdown 生成；"
+            "只想编译它的话，用 `typst compile` 直接编译。"
+        )
+    tail = text[start:]
+    end = tail.find("\n)\n")
+    block = tail[:end] if end >= 0 else tail
+
+    style: dict = {}
+    group: dict | None = None
+    for raw in block.splitlines()[1:]:
+        line = raw.strip()
+        if not line or line.startswith("//"):
+            continue
+        if line == "),":
+            group = None
+        elif line.endswith(": ("):
+            group = {}
+            style[line[:-3].strip()] = group
+        elif ":" in line:
+            key, _, value = line.partition(":")
+            target = style if group is None else group
+            target[key.strip()] = _typst_scalar(value.strip().rstrip(","))
+    if "text" not in style:
+        raise SpecError("这个 .typ 的 style 里没有 text 段，无法校验排版原则")
+    return style
 
 
 # --------------------------------------------------------------------------- #
@@ -1309,7 +1496,8 @@ def root_from_typ(typ: Path) -> Path | None:
 
 
 def compose(typ_path: Path, *, meta_ty: str, letter_ty: str, bib_ty: str, style: dict,
-            body: str, root: Path | None = None, include_chess: bool = False) -> None:
+            body: str, root: Path | None = None, include_chess: bool = False,
+            deviations: dict | None = None) -> None:
     root_needed = root is not None and root.resolve() != typ_path.parent.resolve()
     manual = ["typst", "compile"]
     if root_needed:
@@ -1331,6 +1519,9 @@ def compose(typ_path: Path, *, meta_ty: str, letter_ty: str, bib_ty: str, style:
     if root_needed or include_chess:
         flags = " ".join(f'"{part}"' if " " in part else part for part in manual[:-1])
         header += f"// 手工编译：{flags} {manual[-1]}\n"
+    for rule, record in (deviations or {}).items():
+        payload = {"rule": rule, "source": record["source"], "reason": record["reason"]}
+        header += DEVIATION_MARKER + json.dumps(payload, ensure_ascii=False) + "\n"
     style_lit = typst_dict(style, KNOBS)
     text = "\n".join([
         header,
@@ -1496,7 +1687,9 @@ def render_samples(typ: Path, samples: list[int], preview: Path,
 
 def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
               sets: list[str], doc_path: Path | None, from_fmt: str,
-              check_mode: str, keep_typ: bool, quiet: bool) -> dict:
+              check_mode: str, keep_typ: bool, quiet: bool,
+              deviation_args: list[str] | None = None,
+              deviation_source: str = "user") -> dict:
     started = time.time()
     need("typst", "安装：winget install Typst.Typst 或 scoop install typst")
     need("pandoc", "安装：winget install JohnMacFarlane.Pandoc")
@@ -1505,12 +1698,16 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
             raise SpecError(f"找不到输入文件 {path}")
 
     first = inputs[0]
-    doc_spec: dict = {}
     spec_path = doc_path or first.with_suffix(".doc.yml")
+    if doc_path and not doc_path.exists():
+        raise SpecError(f"找不到样式文件 {doc_path}")
+    # `--deviation` writes the record and nothing else; the exemption below comes
+    # from reading the file back, so a flag that never lands exempts nothing.
+    for record in deviation_args or []:
+        write_deviation(spec_path, record, deviation_source)
+    doc_spec: dict = {}
     if spec_path.exists():
         doc_spec = parse_simple_yaml(spec_path.read_text(encoding="utf-8"))
-    elif doc_path:
-        raise SpecError(f"找不到样式文件 {doc_path}")
 
     fm = read_frontmatter(first)
     chosen = kind or fm.get("kind") or doc_spec.get("kind") or "report"
@@ -1525,6 +1722,8 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
     style = resolve_style(str(chosen), doc_spec, sets, lang, notes,
                           has_bibliography=bib_path is not None,
                           has_sidenotes=has_notes)
+    deviations = deviations_of(doc_spec)
+    check_principles(style, deviations, notes)
     # Footnotes only reach the margin when margin mode is on, so they only need
     # checking then.
     _, long_notes, crowded = inspect_sidenotes(
@@ -1539,6 +1738,11 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         body_note = "复用已有 .typ"
         root = root_from_typ(typ_path)
         diagram_warnings: list[str] = []
+        # The reused file may have been hand-edited since it was generated, so
+        # the gate has to read what it actually says, not just the spec.
+        reused = typ_path.read_text(encoding="utf-8")
+        check_principles(parse_style_literal(reused),
+                         {**deviations, **deviations_from_typ(reused)}, notes)
     else:
         body_note = "pandoc 解析"
         meta = pandoc_meta(first, from_fmt)
@@ -1581,7 +1785,8 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
             asset_path(bib_path, typ_path.parent, root) if bib_path else ""
         )
         compose(typ_path, meta_ty=meta, letter_ty=letter_snippet(fm), bib_ty=bib_ty,
-                style=style, body=body, root=root, include_chess=needs_chess)
+                style=style, body=body, root=root, include_chess=needs_chess,
+                deviations=deviations)
 
     proc = run(["typst", "compile", *typst_args(root), str(typ_path), str(out_pdf)], check=False)
     warnings = parse_warnings(proc.stderr)
@@ -1690,6 +1895,12 @@ def cmd_build(args) -> int:
     # `build something.typ` is treated as "compile and check this file", which
     # is what people mean after hand-editing an intermediate.
     if len(args.inputs) == 1 and args.inputs[0].lower().endswith(".typ"):
+        if args.deviation:
+            raise SpecError(
+                "build 一个 .typ 时不接受 --deviation：偏离得写进 .typ 头部或它旁边的 "
+                "doc.yml。先用 build 从 Markdown 生成（--deviation 会写进 "
+                "<Markdown>.doc.yml），再改 .typ。"
+            )
         ns = argparse.Namespace(typ=args.inputs[0], check="all" if args.check == "all" else "sample")
         return cmd_check(ns)
     inputs = [Path(p) for p in args.inputs]
@@ -1697,6 +1908,7 @@ def cmd_build(args) -> int:
         inputs, Path(args.output) if args.output else None, args.kind,
         args.set or [], Path(args.doc) if args.doc else None,
         args.from_format, args.check, args.keep_typ, args.quiet,
+        args.deviation, args.deviation_source,
     )
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
@@ -1708,21 +1920,37 @@ def cmd_style(args) -> int:
     for path in inputs:
         if not path.exists():
             raise SpecError(f"找不到输入文件 {path}")
-    doc_spec = {}
-    if args.doc:
-        doc_spec = parse_simple_yaml(Path(args.doc).read_text(encoding="utf-8"))
+    # Mirror `build`: the sidecar doc.yml is the document's spec unless --doc
+    # names another, so the printed spec is the one the build would use.
+    spec_path = Path(args.doc) if args.doc else inputs[0].with_suffix(".doc.yml")
+    if args.doc and not spec_path.exists():
+        raise SpecError(f"找不到样式文件 {args.doc}")
+    doc_spec = parse_simple_yaml(spec_path.read_text(encoding="utf-8")) if spec_path.exists() else {}
     fm = read_frontmatter(inputs[0])
     kind = args.kind or doc_spec.get("kind") or fm.get("kind") or "report"
     source_text = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs)
     lang = detect_lang(source_text)
     has_notes, _, _ = inspect_sidenotes(source_text)
-    style = resolve_style(str(kind), doc_spec, args.set or [], lang,
+    notes: list[str] = []
+    style = resolve_style(str(kind), doc_spec, args.set or [], lang, notes,
                           has_bibliography=bibliography_field(fm) != "",
                           has_sidenotes=has_notes)
+    check_principles(style, deviations_of(doc_spec), notes)
+    # Notes go to stderr: stdout is the spec itself, and people pipe it.
+    for note in notes:
+        print(f"i     {note}", file=sys.stderr)
     text = to_yaml(style)
     if args.write:
         target = Path(args.write)
-        target.write_text(text, encoding="utf-8")
+        # The spec file also carries `deviations:`; exporting a spec must not
+        # quietly delete the records that let it build.
+        deviations = dict(doc_spec.get("deviations") or {})
+        if target.exists():
+            existing = parse_simple_yaml(target.read_text(encoding="utf-8"))
+            deviations = {**(existing.get("deviations") or {}), **deviations}
+        if deviations:
+            text += "\n\ndeviations:\n" + to_yaml(deviations, 2)
+        target.write_text(text + "\n", encoding="utf-8")
         print(f"写入 {target}")
     else:
         print(text)
@@ -1759,10 +1987,65 @@ def to_yaml(data: dict, indent: int = 0) -> str:
     return "\n".join(lines)
 
 
+def write_deviation(path: Path, record: str, source: str = "user") -> None:
+    """Append one deviation to `doc.yml`; it exempts only when read back.
+
+    The file is edited in place rather than re-serialised: doc.yml is often
+    hand-written, and a round trip through the writer would drop comments and
+    turn block scalars into something the parser cannot read back.
+    """
+    if "=" not in record:
+        raise SpecError(f"--deviation 需要 规则=原因，收到 {record!r}")
+    rule, _, reason = record.partition("=")
+    rule = rule.strip()
+    entry = _deviation_record(rule, reason, source)
+
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = text.splitlines()
+    block = [
+        f"  {rule}:",
+        f"    source: {entry['source']}",
+        f"    reason: {json.dumps(entry['reason'], ensure_ascii=False)}",
+    ]
+    start = next(
+        (i for i, line in enumerate(lines) if re.fullmatch(r"deviations:\s*", line)), None
+    )
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(["deviations:"] + block)
+    else:
+        end = start + 1
+        while end < len(lines) and (
+            not lines[end].strip() or lines[end].startswith((" ", "\t"))
+        ):
+            end += 1
+        lines[end:end] = block
+
+    new_text = "\n".join(lines) + "\n"
+    landed = parse_simple_yaml(new_text).get("deviations", {}).get(rule)
+    if landed != entry:
+        raise SpecError(f"写入 {path} 失败：偏离记录没有落到文件里，请手工添加")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    print(f"偏离  {path} ← {rule}（{entry['source']}）")
+
+
 def cmd_check(args) -> int:
     typ = Path(args.typ)
     if not typ.exists():
         raise SpecError(f"找不到 {typ}")
+    # This path never sees a spec, so the style is read back out of the .typ and
+    # deviations come from the .typ itself, falling back to an adjacent doc.yml
+    # for files generated before the header carried them.
+    notes: list[str] = []
+    text = typ.read_text(encoding="utf-8")
+    sidecar = typ.with_suffix(".doc.yml")
+    declared = deviations_of(
+        parse_simple_yaml(sidecar.read_text(encoding="utf-8")) if sidecar.exists() else {}
+    )
+    check_principles(parse_style_literal(text),
+                     {**declared, **deviations_from_typ(text)}, notes)
     root = root_from_typ(typ)
     proc = run(["typst", "compile", *typst_args(root), str(typ), str(typ.with_suffix(".pdf"))],
                check=False)
@@ -1777,6 +2060,8 @@ def cmd_check(args) -> int:
         shutil.rmtree(preview, ignore_errors=True)
     rendered = render_samples(typ, samples, preview, root=root)
     print(f"页数 {total}")
+    for note in notes:
+        print(f"i     {note}")
     for warning in warnings:
         print(f"! {warning}")
     for sample in rendered:
@@ -1898,6 +2183,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--kind", choices=KINDS)
     p.add_argument("--set", action="append", metavar="KEY=VALUE")
     p.add_argument("--doc", help="Style spec 文件（默认 <首个输入文件>.doc.yml）")
+    p.add_argument("--deviation", action="append", metavar="RULE=REASON",
+                   help="把一条排版原则偏离写进 doc.yml（写入后即生效；不写入则不放行）")
+    p.add_argument("--deviation-source", choices=("user", "standard"), default="user",
+                   help="--deviation 的来源：user（用户授权，默认）或 standard（机构规范）")
     p.add_argument("--from", dest="from_format", default=FROM_FORMAT,
                    help=f"Markdown 方言（默认：{FROM_FORMAT}）")
     p.add_argument("--check", choices=("none", "sample", "all"), default="sample")

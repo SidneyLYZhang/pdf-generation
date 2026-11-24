@@ -40,6 +40,23 @@ python scripts/build_pdf.py doctor
 
 说明 Style spec 缺字段——通常是直接改坏了 `<stem>.typ`。删掉 `.typ` 重新 `build` 即可（`.typ` 每次构建都会重新生成）。
 
+### `排版原则校验未通过：[indent-and-spacing] ...`
+
+构建前的门禁拒绝了一个自相矛盾的 Style spec。现行两条规则：
+
+- `indent-and-spacing`：首行缩进与可见段距同时在用，分段手段重复。把 `text.paragraph-spacing` 降到 4.5pt（Typst 的下限），让缩进独自分段。
+- `spacing-below-leading`：没有首行缩进，段距却不大于行距间隙，段落之间看不出分隔。把 `text.paragraph-spacing` 提到行距间隙之上。
+
+确实需要这样排（机构模板要求，或用户明确坚持），就写一条带原因的偏离：
+
+```bash
+python scripts/build_pdf.py build doc.md --deviation "indent-and-spacing=期刊模板要求段间空一行"
+```
+
+`--deviation` 只负责把记录写进 `<首个输入文件>.doc.yml`；真正放行的是文件里的记录，删掉它，同样的 spec 又会被拒。加 `--deviation-source standard` 把来源标记为机构规范（默认 `user`）。记录还会写进生成的 `.typ` 头部，所以 `.typ` 被改名或搬走后 `build x.typ` 仍认自己的豁免；头部没有记录、旁边也没有 doc.yml 时，它照样被拦。
+
+没写原因的偏离一律拒绝，这是刻意的：静默绕过会让门禁变成装饰。
+
 ## 版式问题
 
 ### 段落叠在一起
