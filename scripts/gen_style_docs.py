@@ -77,6 +77,7 @@ out.append("3. `<首个输入文件>.doc.yml` 的 `style:`")
 out.append("4. Kind 默认值")
 out.append("5. 全局默认值\n")
 out.append("未知 key 会直接报错，并给出最接近的合法项。\n")
+out.append("另有一处默认随语言推导：纯英文 A4 文档的页边距取 `4.8cm`，让每行落在约 70–75 字符（原则区间 50–75）；作者显式设置的页边距、自带页边距的 Kind、以及 `note` 不受影响。\n")
 
 out.append("## 全局默认\n")
 out.append("| 旋钮 | 类型 | 默认值 | 说明 |")

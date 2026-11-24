@@ -131,6 +131,77 @@ class ResolveStyleTests(unittest.TestCase):
         self.assertIn("Noto Serif SC", zh["text"]["font"])
         self.assertEqual(en["text"]["font"], ["Libertinus Serif"])
 
+    # Measured from a 300 ppi probe: the bundled CJK body font lays out an 8.00pt
+    # line box at 11pt, so what a reader experiences is (line box + leading) /
+    # size -- not 1 + leading.  This is the Chinese-prose range; Western prose
+    # has its own, lower comfortable range and is not asserted here.
+    LINE_BOX_EM = 8.0 / 11.0
+
+    def _leading_factor(self, kind: str) -> float:
+        style = bp.resolve_style(kind, {}, [], "zh")
+        size = bp.length_pt(style["text"]["size"], 11.0)
+        lead = bp.length_pt(style["text"]["leading"], size)
+        return (self.LINE_BOX_EM * size + lead) / size
+
+    def test_every_kind_leading_sits_in_the_chinese_range(self):
+        for kind in bp.KINDS:
+            with self.subTest(kind=kind):
+                self.assertGreaterEqual(self._leading_factor(kind), 1.4)
+                self.assertLessEqual(self._leading_factor(kind), 1.75)
+
+    def test_indented_kinds_use_only_the_typst_minimum_gap(self):
+        # Indent or paragraph spacing, never both: indented Kinds pin the gap at
+        # Typst's floor and let the indent alone mark the break.  Anything above
+        # the floor becomes a second way of separating paragraphs.
+        for kind in ("book", "textbook", "novel"):
+            with self.subTest(kind=kind):
+                style = bp.resolve_style(kind, {}, [], "zh")
+                self.assertEqual(style["text"]["first-line-indent"], "2em")
+                self.assertEqual(style["text"]["paragraph-spacing"], "4.5pt")
+
+    def test_spaced_kinds_separate_paragraphs_more_than_lines(self):
+        for kind in ("report", "article", "letter", "note"):
+            style = bp.resolve_style(kind, {}, [], "zh")
+            size = bp.length_pt(style["text"]["size"], 11.0)
+            lead = bp.length_pt(style["text"]["leading"], size)
+            gap = bp.length_pt(style["text"]["paragraph-spacing"], size)
+            self.assertGreater(gap, lead, kind)
+
+    def test_letter_heading_reaches_thirty_percent_above_body(self):
+        style = bp.resolve_style("letter", {}, [], "zh")
+        body = bp.length_pt(style["text"]["size"], 11.0)
+        head = bp.length_pt(style["heading"]["size-1"], body)
+        self.assertGreaterEqual(head / body, 1.3 - 1e-9)
+
+    def test_english_a4_gets_a_narrower_measure(self):
+        en = bp.resolve_style("report", {}, [], "en")
+        zh = bp.resolve_style("report", {}, [], "zh")
+        self.assertEqual(en["page"]["margin"], "4.8cm")
+        self.assertEqual(zh["page"]["margin"], "2.5cm")
+
+    def test_english_measure_lands_in_comfortable_character_count(self):
+        style = bp.resolve_style("report", {}, [], "en")
+        a4_width = 210 / 25.4 * 72
+        margin = bp.length_pt(style["page"]["margin"], 11.0)
+        size = bp.length_pt(style["text"]["size"], 11.0)
+        # Running prose in Libertinus averages at most 0.42em per character;
+        # the wide bound keeps this assertion from overstating the result.
+        chars = (a4_width - 2 * margin) / (0.42 * size)
+        self.assertGreaterEqual(chars, 60)
+        self.assertLessEqual(chars, 75)
+
+    def test_compact_kinds_keep_their_dense_page_in_english(self):
+        # `note` is defined by a dense page, so the English measure rule must not
+        # widen it; the build warning reports the wide measure instead.
+        note = bp.resolve_style("note", {}, [], "en")
+        self.assertEqual(note["page"]["margin"], "2.5cm")
+
+    def test_explicit_margin_beats_english_default(self):
+        by_set = bp.resolve_style("report", {}, ["page.margin=2cm"], "en")
+        by_doc = bp.resolve_style("report", {"style": {"page": {"margin": "3cm"}}}, [], "en")
+        self.assertEqual(by_set["page"]["margin"], "2cm")
+        self.assertEqual(by_doc["page"]["margin"], "3cm")
+
 
 class CitationStyleTests(unittest.TestCase):
     def test_style_defaults_follow_language_and_kind(self):

@@ -52,6 +52,11 @@ CHESS_TEMPLATE = "38-chess.typ"
 
 KINDS = ("report", "article", "letter", "note", "book", "textbook", "novel")
 
+# Kinds built around a dense page: they keep the default margin even for English
+# prose, since a narrow measure would fight their whole point (CONTEXT.md: Note
+# is「紧凑排版, 少留白」).  A wide measure there is a build warning, not a default.
+COMPACT_KINDS = {"note"}
+
 # The Markdown dialect is a pinned constant, not pandoc's default, so that a
 # pandoc upgrade cannot silently change how documents parse (ADR-0003).
 #   +lists_without_preceding_blankline  keep GFM's "list right after a colon line"
@@ -201,6 +206,7 @@ PRESETS: dict[str, dict[str, object]] = {
         "heading.rule": False,
         "furniture.header": "title",
         "furniture.page-number": "footer-center",
+        "text.leading": "0.75em",
         "text.paragraph-spacing": "1em",
         "text.first-line-indent": "0em",
         "text.size": "11pt",
@@ -214,6 +220,7 @@ PRESETS: dict[str, dict[str, object]] = {
         "heading.size-1": "19pt",
         "furniture.header": "none",
         "furniture.page-number": "footer-center",
+        "text.leading": "0.78em",
         "text.paragraph-spacing": "0.9em",
         "text.first-line-indent": "0em",
         "text.size": "11pt",
@@ -224,10 +231,11 @@ PRESETS: dict[str, dict[str, object]] = {
         "toc.enabled": False,
         "heading.numbering": "none",
         "heading.page-break-before": False,
-        "heading.size-1": "14pt",
+        "heading.size-1": "15pt",
         "heading.rule": False,
         "furniture.header": "none",
         "furniture.page-number": "none",
+        "text.leading": "0.72em",
         "text.paragraph-spacing": "1.2em",
         "text.first-line-indent": "0em",
         "text.size": "11.5pt",
@@ -241,10 +249,10 @@ PRESETS: dict[str, dict[str, object]] = {
         "heading.size-1": "17pt",
         "furniture.header": "none",
         "furniture.page-number": "footer-right",
-        "text.paragraph-spacing": "0.5em",
+        "text.paragraph-spacing": "0.8em",
         "text.first-line-indent": "0em",
         "text.size": "10.5pt",
-        "text.leading": "0.6em",
+        "text.leading": "0.69em",
     },
     "book": {
         "page.paper": "6x9",
@@ -261,7 +269,8 @@ PRESETS: dict[str, dict[str, object]] = {
         "heading.rule": True,
         "furniture.header": "book",
         "furniture.page-number": "footer-outside",
-        "text.paragraph-spacing": "0.45em",
+        "text.leading": "0.78em",
+        "text.paragraph-spacing": "4.5pt",
         "text.first-line-indent": "2em",
         "text.size": "10.5pt",
         "math.numbering": "(1)",
@@ -283,7 +292,8 @@ PRESETS: dict[str, dict[str, object]] = {
         "heading.rule": True,
         "furniture.header": "chapter",
         "furniture.page-number": "footer-outside",
-        "text.paragraph-spacing": "0.35em",
+        "text.leading": "0.72em",
+        "text.paragraph-spacing": "4.5pt",
         "text.first-line-indent": "2em",
         "text.size": "11pt",
         "semantic.numbering": "1",
@@ -304,7 +314,8 @@ PRESETS: dict[str, dict[str, object]] = {
         "heading.rule": False,
         "furniture.header": "none",
         "furniture.page-number": "footer-center",
-        "text.paragraph-spacing": "0.45em",
+        "text.leading": "0.86em",
+        "text.paragraph-spacing": "4.5pt",
         "text.first-line-indent": "2em",
         "text.size": "10.5pt",
         "novel.dropcap": True,
@@ -893,6 +904,11 @@ def coerce(path: str, value: object) -> object:
     return str(value)
 
 
+def pinned(key: str, entries: dict, sets: list[str]) -> bool:
+    """Did the author set this knob, in `doc.yml` or through `--set`?"""
+    return key in entries or any(raw.partition("=")[0].strip() == key for raw in sets)
+
+
 def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
                   notes: list[str] | None = None, has_bibliography: bool = False,
                   has_sidenotes: bool = False) -> dict:
@@ -990,13 +1006,26 @@ def resolve_style(kind: str, doc_spec: dict, sets: list[str], lang: str,
             flat["cite.style"] = "gb-7714-2015-numeric" if chinese else "ieee"
     if flat["cite.title"] == "auto":
         flat["cite.title"] = "参考文献" if chinese else "References"
+    # Running English prose at 11pt on A4 needs a narrower measure than the
+    # 2.5cm default gives: 16cm runs to ~100 characters a line, past the 50–75
+    # the typography spec calls comfortable.  The margin knob is symmetric, so
+    # the top and bottom grow too; Kinds that pin their own margin are left
+    # alone (textbook's margin column depends on it), and so is `note`, whose
+    # whole identity is a compact page (CONTEXT.md: Note — 少留白).  A wide
+    # measure there is reported by the build warning instead.
+    if (
+        not chinese
+        and flat["page.paper"] == "a4"
+        and kind not in COMPACT_KINDS
+        and not pinned("page.margin", entries, sets)
+        and "page.margin" not in preset
+    ):
+        flat["page.margin"] = "4.8cm"
     # An explicit `[text]{.sidenote}` is a request for margin space, so it turns
     # margin mode on — unless the author set `note.style` on purpose, in which
     # case the precedence rule in style-knobs.md wins and notes fall back to
     # footnotes.
-    note_style_is_explicit = "note.style" in entries or any(
-        raw.partition("=")[0].strip() == "note.style" for raw in sets
-    )
+    note_style_is_explicit = pinned("note.style", entries, sets)
     if has_sidenotes and not note_style_is_explicit:
         flat["note.style"] = "margin"
 

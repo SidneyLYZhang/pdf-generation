@@ -14,6 +14,8 @@
 
 未知 key 会直接报错，并给出最接近的合法项。
 
+另有一处默认随语言推导：纯英文 A4 文档的页边距取 `4.8cm`，让每行落在约 70–75 字符（原则区间 50–75）；作者显式设置的页边距、自带页边距的 Kind、以及 `note` 不受影响。
+
 ## 全局默认
 
 | 旋钮 | 类型 | 默认值 | 说明 |
@@ -71,7 +73,7 @@
 | `note.width` | length | `4.2cm` | 边注栏宽度 |
 | `note.gap` | length | `12pt` | 边注与正文之间的间距 |
 | `note.size` | length | `8pt` | 边注字号 |
-| `cite.enabled` | bool | `auto` | 是否生成参考文献表；auto = 声明了 `bibliography` 才生成 |
+| `cite.enabled` | bool | `auto` | 是否生成参考文献表；true / false / auto（auto = 声明了 `bibliography` 才生成） |
 | `cite.style` | str | `auto` | CSL 样式：内置名（`ieee` / `apa` / `gb-7714-2015-numeric` …）或 `.csl` 路径；auto 按语言与 Kind 取默认 |
 | `cite.title` | str | `auto` | 参考文献标题；auto 按语言取「参考文献 / References」 |
 | `semantic.numbering` | numbering | `1` | 语义块编号格式，如 1 / (1)；none 表示只显示标签不编号 |
@@ -91,7 +93,7 @@
 | `heading.numbering` | `1.1` | `1.1` | `none` | `none` | `1.1` | `1.1.1` | `none` |
 | `heading.page-break-before` | `False` | `False` | `False` | `False` | `True` | `True` | `True` |
 | `heading.rule` | `False` | — | `False` | — | `True` | `True` | `False` |
-| `heading.size-1` | `22pt` | `19pt` | `14pt` | `17pt` | `22pt` | `22pt` | `20pt` |
+| `heading.size-1` | `22pt` | `19pt` | `15pt` | `17pt` | `22pt` | `22pt` | `20pt` |
 | `heading.size-2` | — | — | — | — | `15pt` | `15pt` | — |
 | `heading.size-3` | — | — | — | — | `12pt` | `12pt` | — |
 | `math.numbering` | — | `(1)` | — | — | `(1)` | — | — |
@@ -102,8 +104,8 @@
 | `page.paper` | — | — | — | — | `6x9` | `a4` | `a5` |
 | `semantic.numbering` | `none` | — | — | — | — | `1` | — |
 | `text.first-line-indent` | `0em` | `0em` | `0em` | `0em` | `2em` | `2em` | `2em` |
-| `text.leading` | — | — | — | `0.6em` | — | — | — |
-| `text.paragraph-spacing` | `1em` | `0.9em` | `1.2em` | `0.5em` | `0.45em` | `0.35em` | `0.45em` |
+| `text.leading` | `0.75em` | `0.78em` | `0.72em` | `0.69em` | `0.78em` | `0.72em` | `0.86em` |
+| `text.paragraph-spacing` | `1em` | `0.9em` | `1.2em` | `0.8em` | `4.5pt` | `4.5pt` | `4.5pt` |
 | `text.size` | `11pt` | `11pt` | `11.5pt` | `10.5pt` | `10.5pt` | `11pt` | `10.5pt` |
 | `toc.depth` | `2` | — | — | — | `2` | `3` | `1` |
 | `toc.enabled` | `True` | `False` | `False` | `False` | `True` | `True` | `True` |
