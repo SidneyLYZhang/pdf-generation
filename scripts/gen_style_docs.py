@@ -180,7 +180,7 @@ def splice(existing: str, begin: str, end: str, body: str) -> str:
     start = existing.find(begin)
     stop = existing.find(end)
     if start < 0 or stop < start:
-        raise ValueError(
+        raise b.SpecError(
             f"{TYPOGRAPHY.name} 缺少 {begin} 或 {end}：把这两行标记各占一行补进去"
             "（不要缩进），再重新生成"
         )
@@ -209,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
             (STYLE_KNOBS, render_style_knobs()),
             (TYPOGRAPHY, render_typography(TYPOGRAPHY.read_text(encoding="utf-8"))),
         ]
-    except ValueError as exc:
+    except b.SpecError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
     stale = []

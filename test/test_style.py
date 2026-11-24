@@ -425,16 +425,28 @@ class PrincipleCheckTests(unittest.TestCase):
             bp.check_principles(bp.parse_style_literal(text), {})
         self.assertIn("first-line-indent", str(caught.exception))
 
+    MARKER = (
+        '// pdfgen-deviation: {"rule": "spacing-below-leading", "source": "user", '
+        '"reason": "客户模板要求段间不留空隙"}\n'
+    )
+    STYLE = (
+        "#let style = (\n  text: (\n  size: 11pt,\n  leading: 0.75em,\n"
+        "  paragraph-spacing: 6pt,\n  first-line-indent: 0em,\n),\n)\n"
+    )
+
     def test_deviation_written_into_the_typ_header_is_honoured(self):
-        text = (
-            '#let style = (\n  text: (\n  size: 11pt,\n  leading: 0.75em,\n'
-            "  paragraph-spacing: 6pt,\n  first-line-indent: 0em,\n),\n)\n"
-            '// pdfgen-deviation: {"rule": "spacing-below-leading", "source": "user", '
-            '"reason": "客户模板要求段间不留空隙"}\n'
-        )
+        text = self.MARKER + self.STYLE
         declared = bp.deviations_from_typ(text)
         self.assertEqual(declared["spacing-below-leading"]["reason"], "客户模板要求段间不留空隙")
         bp.check_principles(bp.parse_style_literal(text), declared)
+
+    def test_marker_in_the_body_is_ignored(self):
+        # A raw Typst block in the body can print any line it likes; only the
+        # header the template writes counts, or the gate would be bypassable.
+        text = self.STYLE + "\n{=typst}\n" + self.MARKER + "{=typst}\n"
+        self.assertEqual(bp.deviations_from_typ(text), {})
+        with self.assertRaises(bp.SpecError):
+            bp.check_principles(bp.parse_style_literal(text), {})
 
     def test_two_rule_hints_do_not_send_the_reader_in_a_circle(self):
         # Each hint has to name a path that satisfies the other rule as well:

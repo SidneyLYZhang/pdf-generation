@@ -899,7 +899,7 @@ def coerce(path: str, value: object) -> object:
         if typ == "lengthauto" and s.lower() == "auto":
             return "auto"
         if typ in ("length", "lengthauto") and not re.fullmatch(
-            r"-?\d+(\.\d+)?(pt|cm|mm|in|em|%|ch)", s
+            r"-?\d+(\.\d+)?(pt|cm|mm|in|em|%)", s
         ):
             raise SpecError(f"{path} 需要长度（如 2.5cm / 11pt），收到 {value!r}")
         if typ == "ratio" and not re.fullmatch(r"\d+(\.\d+)?%", s):
@@ -1127,7 +1127,6 @@ def nested(flat: dict) -> dict:
 # The ranges below are the principles' own numbers.  A later ticket generates the
 # published table from them, so they live here and nowhere else.
 CHINESE_LEADING = (1.40, 1.75)
-WESTERN_LEADING = (1.20, 1.45)
 CHINESE_MEASURE = (25, 45)
 WESTERN_MEASURE = (50, 75)
 HEADING_RATIO_MIN = 1.3
@@ -1169,7 +1168,7 @@ def _length_of(style: dict, group: str, key: str) -> float:
     return value
 
 
-def _indent_and_spacing(style: dict, doc: dict) -> str | None:
+def _indent_and_spacing(style: dict, heading_level: int) -> str | None:
     indent = _length_of(style, "text", "first-line-indent")
     spacing = _length_of(style, "text", "paragraph-spacing")
     if indent <= 0 or spacing <= PARAGRAPH_SPACING_FLOOR_PT + 0.01:
@@ -1182,7 +1181,7 @@ def _indent_and_spacing(style: dict, doc: dict) -> str | None:
     )
 
 
-def _spacing_below_leading(style: dict, doc: dict) -> str | None:
+def _spacing_below_leading(style: dict, heading_level: int) -> str | None:
     if _length_of(style, "text", "first-line-indent") > 0:
         return None
     spacing = _length_of(style, "text", "paragraph-spacing")
@@ -1218,7 +1217,7 @@ def line_box_em(style: dict) -> float | None:
     return None
 
 
-def _line_height(style: dict, level: int) -> str | None:
+def _line_height(style: dict, heading_level: int) -> str | None:
     # The principles only state a Chinese band; a Latin band would have to be
     # invented, so Western prose is left alone instead of held to a guess.
     if not _chinese(style):
@@ -1256,7 +1255,7 @@ def text_width_pt(style: dict) -> float:
     return width_mm / 25.4 * 72 - inside - outside
 
 
-def _measure(style: dict, level: int) -> str | None:
+def _measure(style: dict, heading_level: int) -> str | None:
     if str(style.get("kind", "")) in SHORT_FORM_KINDS:
         return None
     width = text_width_pt(style)
@@ -1279,7 +1278,7 @@ def _measure(style: dict, level: int) -> str | None:
     )
 
 
-def _heading_ratio(style: dict, level: int) -> str | None:
+def _heading_ratio(style: dict, heading_level: int) -> str | None:
     size = _length_of(style, "text", "size")
     head = _length_of(style, "heading", "size-1")
     ratio = head / size
@@ -1291,10 +1290,13 @@ def _heading_ratio(style: dict, level: int) -> str | None:
     )
 
 
-def _heading_depth(style: dict, level: int) -> str | None:
-    if level <= MAX_HEADING_LEVEL:
+def _heading_depth(style: dict, heading_level: int) -> str | None:
+    if heading_level <= MAX_HEADING_LEVEL:
         return None
-    return f"文档有 {level} 级标题，建议不超过 {MAX_HEADING_LEVEL} 级——层级太多等于没有层级。"
+    return (
+        f"文档有 {heading_level} 级标题，建议不超过 {MAX_HEADING_LEVEL} 级"
+        "——层级太多等于没有层级。"
+    )
 
 
 PRINCIPLE_RULES = (
@@ -1305,6 +1307,8 @@ PRINCIPLE_RULES = (
     ("heading-ratio", "warning", _heading_ratio),
     ("heading-depth", "warning", _heading_depth),
 )
+# Every rule takes (style, heading_level) so dispatch needs no special cases;
+# most ignore the level, which only `heading-depth` reads.
 RULE_SEVERITY = {rule: severity for rule, severity, _ in PRINCIPLE_RULES}
 ERROR_RULES = {rule for rule, severity in RULE_SEVERITY.items() if severity == "error"}
 
@@ -1381,11 +1385,16 @@ def deviations_of(doc_spec: dict) -> dict[str, dict]:
 def deviations_from_typ(text: str) -> dict:
     """Deviations a generated `.typ` carries in its own header.
 
-    Keeping them in the file, rather than only beside it, means a `.typ` that
-    was moved or renamed still explains why it is allowed to look like that.
+    Only the header counts.  A `{=typst}` block in the body can print any line
+    it likes, so honouring a marker there would be a way around the gate.
     """
     raw: dict = {}
     for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("// ---- "):
+            break  # the template source starts here; the header is above it
+        if stripped and not stripped.startswith("//"):
+            break  # the header is comments only
         if not line.startswith(DEVIATION_MARKER):
             continue
         try:
@@ -1394,6 +1403,11 @@ def deviations_from_typ(text: str) -> dict:
         except (ValueError, KeyError, TypeError):
             raise SpecError(f".typ 头部的偏离记录无法解析：{line!r}")
     return deviations_of({"deviations": raw})
+
+
+def merge_deviations(declared: dict, typ_text: str) -> dict:
+    """doc.yml records, with the ones baked into the `.typ` taking precedence."""
+    return {**declared, **deviations_from_typ(typ_text)}
 
 
 def check_principles(style: dict, deviations: dict, *, max_heading_level: int | None = None,
@@ -1971,7 +1985,7 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         # the gate reads what it actually says, not the spec it came from.
         reused = typ_path.read_text(encoding="utf-8")
         check_principles(parse_style_literal(reused),
-                         {**deviations, **deviations_from_typ(reused)},
+                         merge_deviations(deviations, reused),
                          max_heading_level=heading_depth(reused),
                          notes=notes, warnings=principle_warnings)
     else:
@@ -2059,13 +2073,23 @@ def build_one(inputs: list[Path], out_pdf: Path | None, kind: str | None,
         print(f"PDF   {out_pdf}  ({total} 页, {result['duration']}s)")
         print(f"TYP   {typ_path}")
         print(f"Kind  {chosen}   语言 {lang}   纸张 {style['page']['paper']}")
-        for note in notes:
-            print(f"i     {note}")
-        for warning in warnings:
-            print(f"!     {warning}")
+        report_notes(notes)
+        report_warnings(warnings)
         for sample in rendered:
             print(f"抽检  {sample}")
     return result
+
+
+def report_notes(notes: list[str], stream=None) -> None:
+    """The `i` channel: waived deviations, skipped checks, raised spacing."""
+    for note in notes:
+        print(f"i     {note}", file=stream or sys.stdout)
+
+
+def report_warnings(warnings: list[str], stream=None) -> None:
+    """The `!` channel: principle drift, missing fonts, overflow, crowded notes."""
+    for warning in warnings:
+        print(f"!     {warning}", file=stream or sys.stdout)
 
 
 # --------------------------------------------------------------------------- #
@@ -2173,10 +2197,8 @@ def cmd_style(args) -> int:
                      max_heading_level=heading_depth(source_text),
                      notes=notes, warnings=warnings)
     # Notes and warnings go to stderr: stdout is the spec itself, and people pipe it.
-    for note in notes:
-        print(f"i     {note}", file=sys.stderr)
-    for warning in warnings:
-        print(f"!     {warning}", file=sys.stderr)
+    report_notes(notes, sys.stderr)
+    report_warnings(warnings, sys.stderr)
     text = to_yaml(style)
     if args.write:
         target = Path(args.write)
@@ -2246,7 +2268,8 @@ def write_deviation(path: Path, record: str, source: str = "user") -> None:
         f"    reason: {json.dumps(entry['reason'], ensure_ascii=False)}",
     ]
     start = next(
-        (i for i, line in enumerate(lines) if re.fullmatch(r"deviations:\s*", line)), None
+        (i for i, line in enumerate(lines) if re.fullmatch(r"deviations:\s*(#.*)?", line)),
+        None,
     )
     if start is None:
         if lines and lines[-1].strip():
@@ -2284,7 +2307,7 @@ def cmd_check(args) -> int:
         parse_simple_yaml(sidecar.read_text(encoding="utf-8")) if sidecar.exists() else {}
     )
     check_principles(parse_style_literal(text),
-                     {**declared, **deviations_from_typ(text)},
+                     merge_deviations(declared, text),
                      max_heading_level=heading_depth(text),
                      notes=notes, warnings=gate_warnings)
     root = root_from_typ(typ)
@@ -2301,10 +2324,8 @@ def cmd_check(args) -> int:
         shutil.rmtree(preview, ignore_errors=True)
     rendered = render_samples(typ, samples, preview, root=root)
     print(f"页数 {total}")
-    for note in notes:
-        print(f"i     {note}")
-    for warning in warnings:
-        print(f"! {warning}")
+    report_notes(notes)
+    report_warnings(warnings)
     for sample in rendered:
         print(f"抽检 {sample}")
     return 0

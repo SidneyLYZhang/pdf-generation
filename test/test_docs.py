@@ -82,7 +82,7 @@ class GeneratedDocsTests(unittest.TestCase):
             self.assertEqual(quiet(["--check"]), 1)
 
     def test_missing_markers_are_reported_with_the_fix(self):
-        with self.assertRaises(ValueError) as caught:
+        with self.assertRaises(bp.SpecError) as caught:
             gd.render_typography("没有标记的文档")
         self.assertIn("标记", str(caught.exception))
 
@@ -94,14 +94,17 @@ class EntryDocTests(unittest.TestCase):
         return (ROOT / "SKILL.md").read_text(encoding="utf-8")
 
     def test_entry_quotes_the_ranges_the_code_uses(self):
+        # The entry caches the numbers so an agent need not open the spec to know
+        # what will block; the numbers are the cache, the wording is free.
         entry = self.entry()
         low, high = bp.CHINESE_LEADING
-        self.assertIn(f"中文行距 {low:.2f}–{high:.2f}×", entry)
+        self.assertIn(f"{low:.2f}–{high:.2f}×", entry)
         low, high = bp.CHINESE_MEASURE
-        other_low, other_high = bp.WESTERN_MEASURE
-        self.assertIn(f"中文 {low}–{high}、西文 {other_low}–{other_high}", entry)
-        self.assertIn(f"一级标题 ≥ 正文 {bp.HEADING_RATIO_MIN:g} 倍", entry)
-        self.assertIn(f"标题层级 ≤ {bp.MAX_HEADING_LEVEL} 级", entry)
+        self.assertIn(f"{low}–{high}", entry)
+        low, high = bp.WESTERN_MEASURE
+        self.assertIn(f"{low}–{high}", entry)
+        self.assertIn(f"{bp.HEADING_RATIO_MIN:g} 倍", entry)
+        self.assertIn(f"≤ {bp.MAX_HEADING_LEVEL} 级", entry)
 
     def test_every_reference_doc_is_reachable_from_the_entry(self):
         entry = self.entry()

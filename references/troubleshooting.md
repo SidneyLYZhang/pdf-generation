@@ -61,7 +61,7 @@ python scripts/build_pdf.py build doc.md --deviation "indent-and-spacing=期刊�
 
 这些是**警告**，不影响退出码，也不会拒绝构建。四条区间规则：
 
-- `line-height`：中文行距按「行盒 ÷ 字号 + leading」算出的倍数，落在 1.40–1.75 之外。只对中文判断——原则没给西文行距区间，西文直接跳过并记一条提示。
+- `line-height`：中文行距按「（行盒 + leading）÷ 字号」算出的倍数，落在 1.40–1.75 之外。只对中文判断——原则没给西文行距区间，西文直接跳过并记一条提示。
 - `measure`：每行字数，中文 25–45、西文 50–75。信函与便签这类「一次读完」的 Kind 不看这条。
 - `heading-ratio`：一级标题不到正文的 1.3 倍。
 - `heading-depth`：标题超过 4 级（围栏里的 `#####` 不算）。
